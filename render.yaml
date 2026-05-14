@@ -1,0 +1,66 @@
+# Render Blueprint: two services from one repo.
+#   1. artist-manager  — Next.js UI + API (Node)
+#   2. artist-manager-sidecar — Python FastAPI (Spotify + Wikipedia)
+#
+# Deploy by connecting this repo to render.com → "New Blueprint" → select repo.
+# Render auto-detects this file and creates both services.
+#
+# After first deploy, paste secret env vars in each service's dashboard (see comments).
+# SPOTIFY_SIDECAR_URL on artist-manager gets wired automatically via `fromService`.
+
+services:
+  # ─────────────────────────────────────────────────────────
+  # 1. Sidecar — Python FastAPI service (Spotify + Wikipedia)
+  # ─────────────────────────────────────────────────────────
+  - type: web
+    name: artist-manager-sidecar
+    runtime: python
+    plan: free
+    rootDir: sidecar
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    # No secret env vars needed — sidecar has no API keys of its own
+    # (spotapi uses anonymous Spotify pathfinder; Wikipedia is open).
+
+  # ─────────────────────────────────────────────────────────
+  # 2. Next.js — the actual app UI + API routes
+  # ─────────────────────────────────────────────────────────
+  - type: web
+    name: artist-manager
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # Paste the sidecar's full URL here after first deploy:
+      # https://artist-manager-sidecar-XXXX.onrender.com (from Render dashboard).
+      - key: SPOTIFY_SIDECAR_URL
+        sync: false
+      # Secret env vars — paste in Render dashboard after first deploy.
+      # (Marked sync:false so Render keeps them encrypted, never pulls from yaml.)
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: STEEL_API_KEY
+        sync: false
+      - key: SETLIST_FM_API_KEY
+        sync: false
+      - key: GENIUS_ACCESS_TOKEN
+        sync: false
+      - key: JINA_API_KEY
+        sync: false
+      - key: BRAVE_API_KEY
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: TURSO_URL
+        sync: false
+      - key: TURSO_TOKEN
+        sync: false
+      - key: MUSICBRAINZ_CONTACT
+        value: gregcmcd@gmail.com
