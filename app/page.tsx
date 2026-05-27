@@ -55,6 +55,10 @@ export default function Home() {
   const stopLoopRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Snapshot of reports.length when a scout run starts — used so the
+  // progress bar's "completed" count reflects the current batch only,
+  // not artists scouted in previous runs that are already in `reports`.
+  const reportsAtRunStartRef = useRef(0);
 
   // Persistence backend: 'unknown' on mount → 'turso' or 'local' after first probe.
   const [persistenceMode, setPersistenceMode] = useState<
@@ -338,6 +342,11 @@ export default function Home() {
     );
     const subset = remaining.slice(0, sampleSize);
     if (subset.length === 0) return;
+    // Snapshot reports count at run-start so progress math during scouting
+    // can compute completed-this-batch correctly. The prior formula
+    // (reports.filter not-in-scoutedNames) was mathematically always 0
+    // because scoutedNames is derived from reports.
+    reportsAtRunStartRef.current = reports.length;
     setState("scouting");
     setErrors([]);
     setActiveArtist("");
@@ -531,6 +540,10 @@ export default function Home() {
     }
     setRows(null);
     setFileName("");
+    // Reset the file input's value — browsers dedupe re-uploads of the same
+    // file (no onChange fires for an identical selection). Without this,
+    // clicking IMPORT CSV → picking the same file again appears to do nothing.
+    if (fileInput.current) fileInput.current.value = "";
     resetAll();
   };
 
@@ -559,8 +572,7 @@ export default function Home() {
   const total = state === "scouting" ? thisRunSize : remaining.length;
   const completed =
     state === "scouting"
-      ? reports.filter((r) => !scoutedNames.has(r.name.toLowerCase())).length +
-        errors.length
+      ? reports.length - reportsAtRunStartRef.current + errors.length
       : reports.length;
   const hasResults = reports.length > 0 || errors.length > 0;
   const currentStatus = activeArtist
