@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import type { ArtistReport, Signal } from "@/lib/types";
+import { CustomerCrossoverPanel } from "./CustomerCrossoverPanel";
+import { CustomerCrossoverPanel } from "./CustomerCrossoverPanel";
 
 const SIGNAL_CONFIG: Record<
   Signal,
@@ -373,7 +375,19 @@ export function ArtistRow({
             </div>
           )}
 
-          <div className="md:col-span-2 pt-2 border-t border-ink/10">
+          {report.events && report.events.length > 0 && (
+            <div className="md:col-span-2 pt-3 border-t border-ink/10">
+              <div className="mono text-ink/50 mb-3">
+                ◎ CUSTOMER CROSSOVER · TOUR INTERSECTION
+              </div>
+              <CustomerCrossoverPanel
+                events={report.events}
+                artistName={report.name}
+              />
+            </div>
+          )}
+
+          <div className="md:col-span-2 pt-3 border-t border-ink/10">
             <div className="mono text-ink/50 mb-3">
               ★ DEEP CUTS · INTERVIEW PREP
             </div>

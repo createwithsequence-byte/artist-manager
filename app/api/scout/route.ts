@@ -127,21 +127,12 @@ async function processArtist(
       );
     }
 
-    const haveAnyData =
-      releases.length > 0 ||
-      spotify !== null ||
-      bit !== null ||
-      recentGigs.length > 0;
-
-    if (!haveAnyData) {
-      send({
-        type: "error",
-        artist: name,
-        message:
-          "No data from any source (MusicBrainz, Spotify, Bandsintown all unavailable or empty)",
-      });
-      return;
-    }
+    // Note: Bandsintown is currently behind aggressive Cloudflare protection
+    // — Steel free-tier can no longer bypass it (May 2026). So `bit` is often
+    // null in production. We no longer hard-fail when all data sources are
+    // empty; Gemini synthesizes a "limited data" stub report so the artist
+    // still appears in the UI with their CSV identity intact. The strict
+    // grounding rule keeps the summary honest.
 
     send({ type: "step", artist: name, step: "synthesizing" });
     const synth = await synthesizeArtist({
