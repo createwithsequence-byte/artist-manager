@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
       critiquePromise,
       postBriefingToSlack({
         briefing,
-        totalArtists: body.totalArtists,
+        totalArtists: body.totalArtists ?? body.reports.length,
         reports: body.reports,
       }),
     ]);
