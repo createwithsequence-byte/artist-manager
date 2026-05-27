@@ -85,10 +85,18 @@ export async function POST(req: NextRequest) {
         }
       };
 
-      const updated: ArtistReport[] = [];
+      // Vercel function max is 300s. Stop accepting new work at ~270s so
+      // in-flight reports still have time to persist. Client can call
+      // /api/resynth again to continue from the remaining stubs.
+      const startedAt = Date.now();
+      const softTimeBudgetMs = 270 * 1000;
+      const shouldStop = () => Date.now() - startedAt > softTimeBudgetMs;
+
       let cursor = 0;
+      let savedCount = 0;
       const workers = Array.from({ length: CONCURRENCY }, async () => {
         while (true) {
+          if (shouldStop()) return;
           const i = cursor++;
           if (i >= targets.length) return;
           const r = targets[i];
@@ -104,7 +112,7 @@ export async function POST(req: NextRequest) {
               name: r.name,
               releases: r.releases ?? [],
               followers: r.followers,
-              bandsintownMarkdown: "", // no longer collected
+              bandsintownMarkdown: "",
               recentGigs: r.recentGigs ?? [],
               socialActivity: r.socialActivity,
               spotify: r.spotify,
@@ -116,7 +124,19 @@ export async function POST(req: NextRequest) {
               signals: synth.signals,
               notes: synth.notes,
             });
-            updated.push(next);
+            // Persist IMMEDIATELY — the prior bug was upserting at the end,
+            // so when Vercel killed the function at the 300s mark, every
+            // in-memory success was discarded. Now each artist's new
+            // classification is durable as soon as the LLM call returns.
+            try {
+              await upsertReports(csvName, [next]);
+              savedCount++;
+            } catch (saveErr) {
+              console.warn(
+                `[RESYNTH] persist failed for ${r.name}:`,
+                saveErr instanceof Error ? saveErr.message : String(saveErr),
+              );
+            }
             send({ type: "report", artist: r.name, report: next });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -133,10 +153,9 @@ export async function POST(req: NextRequest) {
 
       try {
         await Promise.all(workers);
-        // Persist all updates in a single batch upsert
-        if (updated.length > 0) {
-          await upsertReports(csvName, updated);
-        }
+        console.warn(
+          `[RESYNTH] finished pass: saved=${savedCount} processed=${cursor} of ${targets.length} targets${shouldStop() ? " (stopped by soft time budget — call /api/resynth again to continue)" : ""}`,
+        );
         send({ type: "done" });
       } finally {
         if (!closed) {

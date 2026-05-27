@@ -21,11 +21,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = (await req.json()) as {
-    reports: ArtistReport[];
-    totalArtists: number;
+  let body: {
+    reports?: ArtistReport[];
+    totalArtists?: number;
     previewOnly?: boolean;
   };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.reports || body.reports.length === 0) {
     return Response.json({ error: "No reports provided" }, { status: 400 });

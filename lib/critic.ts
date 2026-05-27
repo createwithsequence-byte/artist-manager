@@ -14,6 +14,13 @@ export type Critique = {
   approved: boolean;
   issues: CritiqueIssue[];
   rawText?: string;
+  /** True only when the critic actually ran. False means Groq was
+   *  unavailable, returned malformed JSON, or wasn't configured — the
+   *  `approved: true` is a degrade-open default and should NOT be treated
+   *  as a fact-check pass. UI/Slack should surface "critic unavailable". */
+  critiqueRan: boolean;
+  /** Brief reason when critiqueRan is false. */
+  unavailableReason?: string;
 };
 
 /**
@@ -29,7 +36,12 @@ export async function critiqueBriefing(
   sourceReports: ArtistReport[],
 ): Promise<Critique> {
   if (!process.env.GROQ_API_KEY) {
-    return { approved: true, issues: [] };
+    return {
+      approved: true,
+      issues: [],
+      critiqueRan: false,
+      unavailableReason: "GROQ_API_KEY not configured",
+    };
   }
 
   const allCallouts: Callout[] = [
@@ -129,12 +141,25 @@ Return JSON: { "issues": [{ "artist": "...", "issue": "short description", "seve
     let parsed: { issues?: (CritiqueIssue & { severity?: string })[] } = {};
     try {
       parsed = JSON.parse(raw);
-    } catch {
-      return { approved: true, issues: [], rawText: raw };
+    } catch (parseErr) {
+      console.warn(
+        "[CRITIC] non-JSON response:",
+        parseErr instanceof Error ? parseErr.message : String(parseErr),
+        "raw:",
+        raw.slice(0, 200),
+      );
+      return {
+        approved: true,
+        issues: [],
+        rawText: raw,
+        critiqueRan: false,
+        unavailableReason: "Groq returned malformed JSON",
+      };
     }
     // Groq sometimes emits severity: "none" entries when no issues found.
-    // Filter to real issues only (minor or major).
-    const allIssues = parsed.issues ?? [];
+    // Filter to real issues only (minor or major). Also guard against
+    // non-array `issues` field (LLM hallucinates schema).
+    const allIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
     const realIssues = allIssues.filter(
       (i) => i.severity === "minor" || i.severity === "major",
     ) as CritiqueIssue[];
@@ -143,12 +168,16 @@ Return JSON: { "issues": [{ "artist": "...", "issue": "short description", "seve
       approved: !hasMajor,
       issues: realIssues,
       rawText: raw,
+      critiqueRan: true,
     };
   } catch (err) {
-    console.warn(
-      "[CRITIC] groq failed:",
-      err instanceof Error ? err.message : err,
-    );
-    return { approved: true, issues: [] };
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn("[CRITIC] groq failed:", msg);
+    return {
+      approved: true,
+      issues: [],
+      critiqueRan: false,
+      unavailableReason: msg.slice(0, 120),
+    };
   }
 }

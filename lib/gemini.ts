@@ -66,6 +66,26 @@ function isTransientError(msg: string): boolean {
   );
 }
 
+/**
+ * Errors that are specific to the CURRENT model but might succeed on a
+ * different model. Distinct from "give up entirely" errors (auth, request
+ * format violations) where retrying a different model won't help.
+ *
+ * Treating these as model-specific lets us continue the fallback chain
+ * instead of bailing on the first model that complains.
+ */
+function isModelSpecificError(msg: string): boolean {
+  return (
+    msg.includes("400") || // Bad request — often "context too large" on smaller models
+    msg.includes("INVALID_ARGUMENT") ||
+    msg.includes("FAILED_PRECONDITION") ||
+    msg.includes("context") || // "context too large", "context length"
+    msg.includes("safety") || // safety classifier blocks vary by model
+    msg.includes("blocked") ||
+    msg.includes("UNSUPPORTED")
+  );
+}
+
 type GeminiArgs = Parameters<GoogleGenAI["models"]["generateContent"]>[0];
 
 /**
@@ -227,6 +247,17 @@ export async function generateWithRetry(
           continue;
         }
 
+        // Model-specific errors (400, context-too-large, safety blocks) →
+        // try next model. They might succeed elsewhere in the chain.
+        if (isModelSpecificError(msg)) {
+          console.warn(
+            `[GEMINI] model-specific error on ${model} (${msg.slice(0, 100)}), trying next model`,
+          );
+          break;
+        }
+
+        // Auth / config / unknown — give up the whole chain. Retrying a
+        // different model won't fix an invalid API key.
         if (!isTransientError(msg)) throw err;
         break;
       }

@@ -166,6 +166,15 @@ function CrossoverResult({
         <span>
           ✓ {customerCount.toLocaleString()} CUSTOMERS · {result.uniqueStates}{" "}
           STATES
+          {result.droppedCount > 0 && (
+            <span
+              className="text-ink/40 ml-2"
+              title={`${result.droppedCount} customer rows excluded from matching: their "state" value was empty, "USA"/non-US, or otherwise unrecognized. Those rows were preserved in the file — just skipped for tour-stop overlap math.`}
+            >
+              ({result.droppedCount.toLocaleString()} skipped — no recognizable
+              state)
+            </span>
+          )}
         </span>
         <span className="text-ink/40">{fileName}</span>
         <button

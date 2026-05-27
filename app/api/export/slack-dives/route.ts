@@ -17,17 +17,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = (await req.json()) as {
-    reports: ArtistReport[];
-    previewOnly?: boolean;
-  };
+  let body: { reports?: ArtistReport[]; previewOnly?: boolean };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
   if (!body.reports || body.reports.length === 0) {
     return Response.json({ error: "No reports provided" }, { status: 400 });
   }
 
   const withDives = body.reports.filter(
-    (r) => r.deepDive && r.deepDive.facts.length > 0,
+    (r) => r.deepDive && (r.deepDive.facts?.length ?? 0) > 0,
   );
   if (withDives.length === 0) {
     return Response.json(

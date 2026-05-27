@@ -5,28 +5,18 @@ import { braveSearch } from "./brave";
 import { fetchMany, fetchReadable } from "./jina";
 import { generateWithRetry } from "./gemini";
 import { getSpotifyInfo } from "./spotify";
-import type { ArtistLocation, SpotifyInfo } from "./types";
+import type {
+  ArtistLocation,
+  DeepDive,
+  DeepDiveFact,
+  SpotifyInfo,
+} from "./types";
 
-export type DeepDiveFact = {
-  fact: string;
-  category:
-    | "biographical"
-    | "career"
-    | "creative"
-    | "collaborations"
-    | "personal"
-    | "trivia";
-  source: string;
-};
-
-export type DeepDive = {
-  artist: string;
-  context: string;
-  facts: DeepDiveFact[];
-  sourcesChecked: string[];
-  sourcesRejected: { url: string; reason: string }[];
-  generatedAt: string;
-};
+// Re-export so existing consumers that import from "./deepDive" keep working
+// without churn. Source of truth is lib/types.ts — the previous local copy
+// had silently drifted (sourcesRejected required here, optional in types.ts),
+// which would invite wrong-shape bugs across normalize + ArtistRow.
+export type { DeepDive, DeepDiveFact };
 
 // Below this monthly-listener count, the artist almost certainly doesn't have
 // a real Wikipedia article — any match we get will be the wrong artist.

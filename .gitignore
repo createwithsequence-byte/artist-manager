@@ -45,3 +45,4 @@ sidecar/.venv/
 sidecar/__pycache__/
 sidecar/**/__pycache__/
 sidecar/*.pyc
+.playwright-mcp/

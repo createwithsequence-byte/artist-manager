@@ -79,6 +79,10 @@ export type CustomerCrossover = {
   totalCustomers: number;
   /** Unique states represented in the customer list. */
   uniqueStates: number;
+  /** Customer rows dropped because their state couldn't be normalized
+   *  (empty, "USA", non-US country, misspelled). Surfaced in UI so the
+   *  user knows why their 4006-row CSV shows 3555 customers. */
+  droppedCount: number;
   /** Per-tour-stop matches. */
   perEvent: Array<{
     event: ArtistEvent;
@@ -209,6 +213,7 @@ export function crossover(
   return {
     totalCustomers: normalized.length,
     uniqueStates: stateBuckets.size,
+    droppedCount: normalized.length - withState.length,
     perEvent,
     topStates,
   };
