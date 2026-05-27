@@ -7,6 +7,7 @@ import type {
   RecentGig,
   SocialActivity,
   SpotifyInfo,
+  Event as ArtistEvent,
 } from "./types";
 
 // JSON Schema describing the artist report shape we want back.
@@ -75,6 +76,7 @@ export async function synthesizeArtist(args: {
   recentGigs?: RecentGig[];
   socialActivity?: SocialActivity;
   spotify?: SpotifyInfo;
+  ticketmasterEvents?: ArtistEvent[];
 }): Promise<Pick<ArtistReport, "summary" | "signals" | "events" | "notes">> {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -145,8 +147,21 @@ ${args.releases.length === 0 ? "(none in last 24 months)" : args.releases.map((r
 PAST GIGS (last 90 days, from setlist.fm — strong signal of "actively touring right now"):
 ${gigsBlock}
 
-UPCOMING BANDSINTOWN PAGE (raw markdown — extract upcoming events only):
-${args.bandsintownMarkdown.slice(0, 5000) || "(no page data — artist may not be on Bandsintown)"}
+UPCOMING TICKETMASTER EVENTS (structured, authoritative — use these as primary truth):
+${
+  args.ticketmasterEvents && args.ticketmasterEvents.length > 0
+    ? args.ticketmasterEvents
+        .slice(0, 20)
+        .map(
+          (e) =>
+            `  ${e.date} | ${e.venue} | ${e.city}${e.ticketUrl ? ` · ${e.ticketUrl}` : ""}`,
+        )
+        .join("\n")
+    : "(no Ticketmaster events found — artist may not sell through Ticketmaster/Live Nation)"
+}
+
+UPCOMING BANDSINTOWN PAGE (raw markdown — extract upcoming events only, but TICKETMASTER above is more reliable):
+${args.bandsintownMarkdown.slice(0, 5000) || "(no Bandsintown page — Cloudflare currently blocks Steel)"}
 
 SOCIAL ACTIVITY:
 ${socialBlock}

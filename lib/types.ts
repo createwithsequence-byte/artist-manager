@@ -45,6 +45,15 @@ export type SpotifyTopCity = {
   listeners?: number;
 };
 
+export type SpotifyConcert = {
+  date: string; // YYYY-MM-DD
+  venue: string;
+  city: string;
+  festival?: boolean;
+  uri?: string;
+  concertUrl?: string;
+};
+
 export type SpotifyInfo = {
   id?: string;
   name?: string;
@@ -57,6 +66,12 @@ export type SpotifyInfo = {
   latestRelease?: { name?: string; type?: string; date?: string };
   topTracks?: SpotifyTopTrack[];
   biography?: string;
+  /**
+   * Upcoming concerts pulled from Spotify's `goods.concerts` field.
+   * Spotify federates this from Bandsintown — our route back to that data
+   * since Bandsintown's web pages are now Cloudflare-blocked for Steel.
+   */
+  concerts?: SpotifyConcert[];
 };
 
 export type ArtistLocation = {

@@ -4,6 +4,7 @@ import { findBandsintownArtist, getBandsintownPage } from "@/lib/steel";
 import { getRecentGigs } from "@/lib/setlistfm";
 import { checkSocials } from "@/lib/social";
 import { getSpotifyInfo } from "@/lib/spotify";
+import { getEventsForArtist } from "@/lib/ticketmaster";
 import { synthesizeArtist } from "@/lib/synthesize";
 import type { ArtistInput, ArtistReport, ScoutEvent } from "@/lib/types";
 
@@ -112,6 +113,18 @@ async function processArtist(
       );
     }
 
+    // Ticketmaster Discovery — primary upcoming-events source now that
+    // Bandsintown is Cloudflare-blocked. Only finds artists who sell through
+    // Ticketmaster/Live Nation (so indie artists may return [], which is fine).
+    send({ type: "step", artist: name, step: "ticketmaster" });
+    const tm = await soft(
+      "ticketmaster",
+      name,
+      () => getEventsForArtist(name),
+      { events: [], attractionName: null },
+    );
+    const ticketmasterEvents = tm.events;
+
     let socialActivity;
     if (opts.withSocials && (input.instagram || input.tiktok)) {
       send({ type: "step", artist: name, step: "socials" });
@@ -143,6 +156,30 @@ async function processArtist(
       recentGigs,
       socialActivity,
       spotify: spotify ?? undefined,
+      ticketmasterEvents,
+    });
+
+    // Merge events from three sources, deduped by (date + venue + city):
+    //   1. Ticketmaster — clean, structured, only Ticketmaster/Live Nation acts
+    //   2. Spotify concerts — Spotify federates this from Bandsintown server-side
+    //      (covers indie artists Ticketmaster misses; our route around Cloudflare)
+    //   3. Gemini-extracted from Bandsintown markdown (legacy; mostly empty now)
+    const spotifyConcerts = (spotify?.concerts ?? []).map((c) => ({
+      date: c.date,
+      venue: c.venue,
+      city: c.city,
+      ticketUrl: c.concertUrl,
+    }));
+    const seen = new Set<string>();
+    const mergedEvents = [
+      ...ticketmasterEvents,
+      ...spotifyConcerts,
+      ...(synth.events ?? []),
+    ].filter((e) => {
+      const key = `${e.date}|${e.venue}|${e.city}`.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
 
     const report: ArtistReport = {
@@ -152,7 +189,7 @@ async function processArtist(
       followers: bit?.followers,
       bandsintownUrl: bit?.url,
       releases,
-      events: synth.events,
+      events: mergedEvents,
       notes: synth.notes,
       recentGigs,
       socialActivity,

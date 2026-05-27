@@ -3,7 +3,6 @@
 import { useState } from "react";
 import type { ArtistReport, Signal } from "@/lib/types";
 import { CustomerCrossoverPanel } from "./CustomerCrossoverPanel";
-import { CustomerCrossoverPanel } from "./CustomerCrossoverPanel";
 
 const SIGNAL_CONFIG: Record<
   Signal,

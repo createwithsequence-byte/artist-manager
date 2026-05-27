@@ -79,6 +79,7 @@ def normalize_overview(raw: dict) -> dict:
     stats = artist.get("stats", {}) or {}
     visuals = artist.get("visuals", {}) or {}
     discography = artist.get("discography", {}) or {}
+    goods = artist.get("goods", {}) or {}
 
     # Latest release
     latest = safe_get(discography, "latest")
@@ -167,7 +168,43 @@ def normalize_overview(raw: dict) -> dict:
             {"name": link.get("name"), "url": link.get("url")}
             for link in (safe_get(profile, "externalLinks", "items", default=[]) or [])
         ],
+        # Concerts — Spotify pulls these from Bandsintown server-side. This is
+        # our route back to Bandsintown data now that Steel is Cloudflare-blocked.
+        "concerts": _extract_concerts(goods),
     }
+
+
+def _extract_concerts(goods: dict) -> list[dict]:
+    """
+    Extract upcoming concerts from artistUnion.goods.concerts.
+    Spotify federates this data from Bandsintown (their partner), so we
+    effectively get Bandsintown's indie tour coverage via Spotify's API.
+    """
+    items = safe_get(goods, "concerts", "items", default=[]) or []
+    out: list[dict] = []
+    for it in items[:40]:
+        d = it.get("data") if isinstance(it, dict) else None
+        if not isinstance(d, dict):
+            continue
+        loc = d.get("location") or {}
+        # startDateIsoString is the canonical field; fall back to a few variants
+        iso = (
+            d.get("startDateIsoString")
+            or safe_get(d, "startDate", "isoString")
+            or safe_get(d, "date", "isoString")
+        )
+        date = (iso or "")[:10] if iso else None
+        if not date:
+            continue
+        out.append({
+            "date": date,
+            "venue": loc.get("name") or "TBD",
+            "city": loc.get("city") or "?",
+            "festival": bool(d.get("festival")),
+            "uri": d.get("uri"),
+            "concertUrl": d.get("concertUrl") or d.get("url"),
+        })
+    return out
 
 
 def _try_search(client: Artist, name: str) -> str | None:
