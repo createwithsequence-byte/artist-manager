@@ -247,6 +247,20 @@ def get_wiki() -> wikipediaapi.Wikipedia:
     return _wiki
 
 
+@app.get("/")
+def root() -> dict[str, Any]:
+    """Friendly index so hitting / in a browser isn't a confusing 404."""
+    return {
+        "service": "artist-manager-sidecar",
+        "status": "ok",
+        "endpoints": {
+            "/health": "liveness check",
+            "/artist?name=...": "Spotify artist lookup (also accepts &spotify_id=)",
+            "/wikipedia?name=...": "Wikipedia page lookup with section text",
+        },
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
