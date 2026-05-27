@@ -535,10 +535,13 @@ function SpotifyStat({
   text?: string;
   accent?: boolean;
 }) {
+  // Use typeof === 'number' rather than !== undefined: the Spotify sidecar
+  // returns literal null for missing stats, which would pass an undefined
+  // check then crash on null.toLocaleString().
   const display =
-    text !== undefined
+    text !== undefined && text !== null
       ? text
-      : value !== undefined
+      : typeof value === "number"
         ? value.toLocaleString()
         : "—";
   return (
