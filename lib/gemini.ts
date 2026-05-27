@@ -56,6 +56,18 @@ const GROQ_CHAIN = [
   "gemma2-9b-it",
 ];
 
+// Cerebras chain — third-tier fallback when both Gemini AND Groq are exhausted.
+// Cerebras is a completely separate provider (independent billing entity →
+// fresh quota pool) running open-weight models on custom silicon. ~2,700 tok/s
+// — typically 10x faster than Groq, 50x faster than Gemini when quota-bouncing.
+// Free tier: 14,400 RPD on gpt-oss-120b.
+//
+// IMPORTANT: gpt-oss-120b is a REASONING model — every response emits a
+// `reasoning` chain-of-thought field followed by `content`. We only consume
+// `content` for our JSON-shaped synth outputs and ignore `reasoning`.
+const CEREBRAS_CHAIN = ["gpt-oss-120b", "zai-glm-4.7"];
+const CEREBRAS_BASE = "https://api.cerebras.ai/v1";
+
 function isDailyQuotaError(msg: string): boolean {
   return (
     msg.includes("RESOURCE_EXHAUSTED") &&
@@ -215,11 +227,113 @@ async function callGroq(args: GeminiArgs): Promise<GenerateContentResponse> {
 }
 
 /**
- * Wrap a Gemini generateContent call with:
+ * Fallback to Cerebras when both Gemini AND Groq are exhausted.
+ *
+ * Cerebras uses an OpenAI-compatible REST API — we hit it via plain fetch
+ * to avoid pulling in another SDK. The response shape is OpenAI-style
+ * (`choices[0].message.content`) so we re-shape it to look like Gemini's
+ * `GenerateContentResponse` for transparent caller substitution, same
+ * pattern as `callGroq`.
+ *
+ * The gpt-oss-120b model is a reasoning model: its response includes a
+ * `reasoning` field with chain-of-thought followed by `content` with the
+ * actual answer. We only consume `content`.
+ */
+async function callCerebras(
+  args: GeminiArgs,
+): Promise<GenerateContentResponse> {
+  const key = process.env.CEREBRAS_API_KEY;
+  if (!key) throw new Error("CEREBRAS_API_KEY not set");
+
+  const prompt = promptFromGeminiArgs(args);
+  const schema = args.config?.responseSchema;
+  const wantsJson =
+    args.config?.responseMimeType === "application/json" || !!schema;
+  const schemaHint = schema
+    ? `\n\nReturn ONLY a JSON object matching exactly this schema (no markdown fences, no prose):\n${JSON.stringify(schema, null, 2)}`
+    : wantsJson
+      ? "\n\nReturn ONLY a JSON object (no markdown fences, no prose)."
+      : "";
+  const temperature =
+    typeof args.config?.temperature === "number"
+      ? args.config.temperature
+      : 0.3;
+
+  let lastErr: unknown = null;
+  for (const model of CEREBRAS_CHAIN) {
+    try {
+      const res = await fetch(`${CEREBRAS_BASE}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt + schemaHint }],
+          response_format: wantsJson ? { type: "json_object" } : undefined,
+          temperature,
+          max_tokens: 4096,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        lastErr = new Error(
+          `Cerebras ${model} HTTP ${res.status}: ${errText.slice(0, 200)}`,
+        );
+        // 429 = rate limit on this model; 404 = model not in our tier; both → try next
+        if (res.status === 429 || res.status === 404 || res.status === 400) {
+          console.warn(
+            `[CEREBRAS] ${model} HTTP ${res.status}, trying next model`,
+          );
+          continue;
+        }
+        // 401/403 = auth — no point trying other models
+        throw lastErr;
+      }
+      const json = (await res.json()) as {
+        choices?: { message?: { content?: string } }[];
+      };
+      const text = json.choices?.[0]?.message?.content ?? "";
+      if (!text) {
+        lastErr = new Error(`Cerebras ${model} returned empty content`);
+        continue;
+      }
+      console.warn(`[CEREBRAS] answered via ${model}`);
+      return {
+        text,
+        candidates: [
+          {
+            content: { parts: [{ text }], role: "model" },
+            finishReason: "STOP",
+            index: 0,
+          },
+        ],
+      } as unknown as GenerateContentResponse;
+    } catch (err) {
+      lastErr = err;
+      console.warn(
+        `[CEREBRAS] ${model} failed (${err instanceof Error ? err.message.slice(0, 120) : String(err)}), trying next model`,
+      );
+    }
+  }
+  throw lastErr ?? new Error("All Cerebras models in chain failed");
+}
+
+/**
+ * Wrap a Gemini generateContent call with a three-tier provider fallback:
  *  1. Per-model retry on transient errors (503/timeouts), exponential backoff
  *  2. Daily-quota fallback chain across Gemini models (each has own quota)
- *  3. Cross-provider fallback to Groq Llama 3.3 (14,400 RPD) when all Gemini
- *     models are daily-exhausted
+ *  3. Cross-provider fallback to Groq chain (4 models × independent TPD pools)
+ *     when all Gemini models are daily-exhausted
+ *  4. Cross-provider fallback to Cerebras (gpt-oss-120b, 14,400 RPD free,
+ *     independent billing entity → fresh quota pool) when both Gemini AND
+ *     Groq are exhausted
+ *
+ * Effective daily ceiling on free tiers: ~1,450 (Gemini) + ~400k tokens
+ * across Groq's 4 models + 14,400 calls on Cerebras ≈ ~17,000 useful synth
+ * calls per day before any provider falls over.
  */
 export async function generateWithRetry(
   args: GeminiArgs,
@@ -290,6 +404,7 @@ export async function generateWithRetry(
   }
 
   // All Gemini models exhausted — try Groq if available
+  let groqErr: unknown = null;
   if (groqClient()) {
     try {
       console.warn(
@@ -297,10 +412,28 @@ export async function generateWithRetry(
       );
       return await callGroq(args);
     } catch (err) {
+      groqErr = err;
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[GROQ] fallback also failed: ${msg.slice(0, 200)}`);
-      // Fall through and throw the original Gemini error so caller sees the
-      // primary failure mode, not the secondary one.
+      // Fall through to Cerebras tier.
+    }
+  }
+
+  // Both Gemini AND Groq exhausted — try Cerebras (gpt-oss-120b on free tier,
+  // 14,400 RPD, independent quota pool, ~10x faster than Groq).
+  if (process.env.CEREBRAS_API_KEY) {
+    try {
+      console.warn(
+        `[GEMINI] Groq also exhausted, falling back to Cerebras gpt-oss-120b`,
+      );
+      return await callCerebras(args);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[CEREBRAS] fallback also failed: ${msg.slice(0, 200)}`);
+      // Surface an aggregate error so debugging shows which providers failed.
+      throw new Error(
+        `All LLM providers failed. Gemini: ${lastErr instanceof Error ? lastErr.message.slice(0, 100) : "n/a"} | Groq: ${groqErr instanceof Error ? groqErr.message.slice(0, 100) : "n/a"} | Cerebras: ${msg.slice(0, 100)}`,
+      );
     }
   }
 
