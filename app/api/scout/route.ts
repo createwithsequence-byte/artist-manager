@@ -94,23 +94,35 @@ async function processArtist(
       ? await soft("setlistfm", name, () => getRecentGigs(mbid, 90), [])
       : [];
 
-    send({ type: "step", artist: name, step: "bandsintown-search" });
-    const bit = await soft(
-      "bandsintown-search",
-      name,
-      () => findBandsintownArtist(name),
-      null,
-    );
-
+    // Bandsintown direct (via Steel) is Cloudflare-blocked since May 2026.
+    // Every call burns 30s+ waiting for a Steel timeout before the soft-fail
+    // wrapper continues. Across 1,800+ artists that's ~7 hours of dead time
+    // per scout run. We get the same tour data via Spotify's federated
+    // `goods.concerts` field (Spotify pulls from Bandsintown server-side),
+    // so disabling the direct path costs us nothing but the follower count.
+    //
+    // Set ENABLE_BANDSINTOWN_DIRECT=1 in env to re-enable if Cloudflare
+    // ever lets Steel through again.
+    const useBandsintown = process.env.ENABLE_BANDSINTOWN_DIRECT === "1";
+    let bit: { url: string; followers?: number } | null = null;
     let bandsintownMarkdown = "";
-    if (bit) {
-      send({ type: "step", artist: name, step: "bandsintown-page" });
-      bandsintownMarkdown = await soft(
-        "bandsintown-page",
+    if (useBandsintown) {
+      send({ type: "step", artist: name, step: "bandsintown-search" });
+      bit = await soft(
+        "bandsintown-search",
         name,
-        () => getBandsintownPage(bit.url),
-        "",
+        () => findBandsintownArtist(name),
+        null,
       );
+      if (bit) {
+        send({ type: "step", artist: name, step: "bandsintown-page" });
+        bandsintownMarkdown = await soft(
+          "bandsintown-page",
+          name,
+          () => getBandsintownPage(bit!.url),
+          "",
+        );
+      }
     }
 
     // Ticketmaster Discovery — primary upcoming-events source now that
@@ -148,16 +160,36 @@ async function processArtist(
     // grounding rule keeps the summary honest.
 
     send({ type: "step", artist: name, step: "synthesizing" });
-    const synth = await synthesizeArtist({
+    // Soft-fail synthesis too: if Gemini + Groq are both exhausted (or any
+    // other transient model error), build a deterministic stub report from
+    // the data we already have. The artist still appears in the UI with
+    // releases/events/Spotify stats; the summary just notes that AI synth
+    // wasn't available. This prevents single LLM hiccups from creating
+    // hours-long "25 FAILED IN A ROW" cascades.
+    const synth = await soft(
+      "synthesize",
       name,
-      releases,
-      followers: bit?.followers,
-      bandsintownMarkdown,
-      recentGigs,
-      socialActivity,
-      spotify: spotify ?? undefined,
-      ticketmasterEvents,
-    });
+      () =>
+        synthesizeArtist({
+          name,
+          releases,
+          followers: bit?.followers,
+          bandsintownMarkdown,
+          recentGigs,
+          socialActivity,
+          spotify: spotify ?? undefined,
+          ticketmasterEvents,
+        }),
+      {
+        summary:
+          spotify || releases.length || ticketmasterEvents.length
+            ? "(AI synthesis unavailable — showing raw signals only)"
+            : "(no data sources returned — re-run when LLM quota resets)",
+        signals: [],
+        events: [],
+        notes: undefined,
+      },
+    );
 
     // Merge events from three sources, deduped by (date + venue + city):
     //   1. Ticketmaster — clean, structured, only Ticketmaster/Live Nation acts
