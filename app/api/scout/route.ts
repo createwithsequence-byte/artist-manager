@@ -6,7 +6,12 @@ import { checkSocials } from "@/lib/social";
 import { getSpotifyInfo } from "@/lib/spotify";
 import { getEventsForArtist } from "@/lib/ticketmaster";
 import { synthesizeArtist } from "@/lib/synthesize";
-import type { ArtistInput, ArtistReport, ScoutEvent } from "@/lib/types";
+import type {
+  ArtistInput,
+  ArtistReport,
+  ScoutEvent,
+  SocialActivity,
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -137,7 +142,7 @@ async function processArtist(
     );
     const ticketmasterEvents = tm.events;
 
-    let socialActivity;
+    let socialActivity: SocialActivity | undefined;
     if (opts.withSocials && (input.instagram || input.tiktok)) {
       send({ type: "step", artist: name, step: "socials" });
       socialActivity = await soft(
