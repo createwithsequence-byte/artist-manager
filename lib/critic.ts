@@ -49,7 +49,9 @@ export async function critiqueBriefing(
     ...briefing.releaseCallouts,
   ];
   if (allCallouts.length === 0) {
-    return { approved: true, issues: [] };
+    // Nothing to critique → vacuously approved. critiqueRan: true because
+    // we DID evaluate the briefing; it just happened to have no callouts.
+    return { approved: true, issues: [], critiqueRan: true };
   }
 
   // Build a lookup of source facts per named artist
