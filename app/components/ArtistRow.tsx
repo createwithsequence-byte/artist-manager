@@ -68,7 +68,7 @@ export function ArtistRow({
   const [open, setOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [diveError, setDiveError] = useState<string | null>(null);
-  const dot = getPrimaryDot(report.signals);
+  const dot = getPrimaryDot(report.signals ?? []);
   const num = String(index + 1).padStart(3, "0");
 
   const generateDeepDive = async () => {
@@ -122,7 +122,7 @@ export function ArtistRow({
               {report.name}
             </span>
             <span className="mono text-ink/40">
-              {report.signals
+              {(report.signals ?? [])
                 .slice(0, 2)
                 .map((s) => SIGNAL_CONFIG[s]?.label ?? s.toUpperCase())
                 .join(" · ")}
@@ -249,12 +249,12 @@ export function ArtistRow({
           )}
 
           <Section title="01 — UPCOMING">
-            {report.events.length === 0 ? (
+            {(report.events ?? []).length === 0 ? (
               <div className="serif-italic text-ink/60">
                 No upcoming shows in window.
               </div>
             ) : (
-              report.events.map((e, i) => (
+              (report.events ?? []).map((e, i) => (
                 <div key={i} className="mb-3 flex gap-4">
                   <div className="mono w-20 shrink-0 text-ink/60">{e.date}</div>
                   <div className="min-w-0">
@@ -284,12 +284,12 @@ export function ArtistRow({
           </Section>
 
           <Section title="02 — RELEASES (24mo)">
-            {report.releases.length === 0 ? (
+            {(report.releases ?? []).length === 0 ? (
               <div className="serif-italic text-ink/60">
                 No releases in the last 24 months.
               </div>
             ) : (
-              report.releases.slice(0, 8).map((r, i) => (
+              (report.releases ?? []).slice(0, 8).map((r, i) => (
                 <div key={i} className="mb-1.5 flex gap-3 items-baseline">
                   <div className="mono w-24 shrink-0 text-ink/60">{r.date}</div>
                   <div className="min-w-0">
@@ -348,7 +348,7 @@ export function ArtistRow({
 
           <div className="md:col-span-2 flex flex-wrap items-center gap-2 pt-2 border-t border-ink/10">
             <div className="mono text-ink/50">SIGNALS</div>
-            {report.signals.map((s) => (
+            {(report.signals ?? []).map((s) => (
               <span
                 key={s}
                 className={`mono border px-2 py-0.5 ${SIGNAL_CONFIG[s]?.chip ?? "border-ink/30"}`}
@@ -447,7 +447,7 @@ function DeepDiveDisplay({
         {dive.context}
       </div>
       <div className="space-y-2.5">
-        {dive.facts.map((f, i) => (
+        {(dive.facts ?? []).map((f, i) => (
           <div key={i} className="flex gap-3 items-baseline">
             <span className="mono text-ink/40 w-5 shrink-0">
               {String(i + 1).padStart(2, "0")}
@@ -473,9 +473,9 @@ function DeepDiveDisplay({
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-3 text-xs">
         <span className="mono text-ink/40">
-          SOURCES · {dive.sourcesChecked.length}
+          SOURCES · {(dive.sourcesChecked ?? []).length}
         </span>
-        {dive.sourcesChecked.map((s) => {
+        {(dive.sourcesChecked ?? []).map((s) => {
           let host = s;
           try {
             host = new URL(s).hostname.replace("en.", "").replace("www.", "");

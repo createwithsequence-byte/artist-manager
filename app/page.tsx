@@ -12,6 +12,7 @@ import type {
   ScoutEvent,
   Signal,
 } from "@/lib/types";
+import { normalizeReport } from "@/lib/normalize";
 
 type ParsedRow = Record<string, string>;
 type FilterKey = "all" | Signal;
@@ -105,8 +106,11 @@ export default function Home() {
           }
 
           if ((json.reports?.length ?? 0) > 0) {
-            // Turso has data — use it
-            setReports(json.reports);
+            // Turso has data — use it. Normalize to guard against legacy
+            // reports missing fields that became required later (events,
+            // releases, signals). Without this, ArtistRow crashes on render
+            // and the global error boundary blanks the page.
+            setReports(json.reports.map(normalizeReport));
             if (localErrors.length) setErrors(localErrors);
             setPersistenceMode("turso");
             return;
@@ -122,7 +126,7 @@ export default function Home() {
                 reports: localReports,
               }),
             });
-            setReports(localReports);
+            setReports(localReports.map(normalizeReport));
             if (localErrors.length) setErrors(localErrors);
             setPersistenceMode("turso");
             console.log(
@@ -142,7 +146,8 @@ export default function Home() {
             const cached = localStorage.getItem(cacheKey);
             if (cached) {
               const parsed = JSON.parse(cached);
-              if (parsed.reports?.length) setReports(parsed.reports);
+              if (parsed.reports?.length)
+                setReports(parsed.reports.map(normalizeReport));
               if (parsed.errors?.length) setErrors(parsed.errors);
             }
           } catch {}
@@ -159,7 +164,8 @@ export default function Home() {
             const cached = localStorage.getItem(cacheKey);
             if (cached) {
               const parsed = JSON.parse(cached);
-              if (parsed.reports?.length) setReports(parsed.reports);
+              if (parsed.reports?.length)
+                setReports(parsed.reports.map(normalizeReport));
               if (parsed.errors?.length) setErrors(parsed.errors);
             }
           } catch {}
@@ -508,7 +514,7 @@ export default function Home() {
   const filteredReports = useMemo(() => {
     let result = reports;
     if (filter !== "all") {
-      result = result.filter((r) => r.signals.includes(filter));
+      result = result.filter((r) => (r.signals ?? []).includes(filter));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
