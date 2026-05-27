@@ -21,6 +21,20 @@ function groqClient(): Groq | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Within a single warm-lambda lifetime, remember which models exhausted their
+// daily quota so we don't burn 3-5s per subsequent call retrying them. Reset
+// after MIDNIGHT_RESET_HOURS (Gemini's free-tier quotas roll daily near midnight
+// Pacific). Lambda recycles or cold-starts reset this implicitly.
+const _modelExhaustedAt = new Map<string, number>();
+const MODEL_COOLDOWN_MS = 60 * 60 * 1000; // 1h — conservative; daily quota typically resets at midnight Pacific
+function isModelExhausted(model: string): boolean {
+  const t = _modelExhaustedAt.get(model);
+  return t !== undefined && Date.now() - t < MODEL_COOLDOWN_MS;
+}
+function markModelExhausted(model: string): void {
+  _modelExhaustedAt.set(model, Date.now());
+}
+
 // Each Gemini model has its OWN daily quota — exhausting one doesn't block the
 // next. Chain them in order before falling through to Groq.
 const GEMINI_CHAIN = [
@@ -214,11 +228,21 @@ export async function generateWithRetry(
   const retries = opts.retries ?? 2;
   const baseDelayMs = opts.baseDelayMs ?? 2000;
   const requestedModel = args.model;
-  const modelsToTry = [
+  const fullChain = [
     requestedModel,
     ...GEMINI_CHAIN.filter((m) => m !== requestedModel),
   ];
+  // Skip models we've already learned are exhausted in this lambda's lifetime.
+  // Big speedup when a batch (resynth, scout) processes many artists in a row:
+  // first artist discovers quota state, the rest go directly to Groq fallback.
+  const modelsToTry = fullChain.filter((m) => !isModelExhausted(m));
   let lastErr: unknown = null;
+
+  if (modelsToTry.length === 0) {
+    console.warn(
+      `[GEMINI] all models in cooldown (cached exhaustion), going direct to Groq`,
+    );
+  }
 
   for (const model of modelsToTry) {
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -235,6 +259,7 @@ export async function generateWithRetry(
           console.warn(
             `[GEMINI] daily quota exhausted on ${model}, falling through`,
           );
+          markModelExhausted(model);
           break;
         }
 
