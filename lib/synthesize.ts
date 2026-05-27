@@ -128,6 +128,12 @@ export async function synthesizeArtist(args: {
         s.latestRelease?.name
           ? `  Latest release on Spotify: ${s.latestRelease.name} (${s.latestRelease.type ?? "release"}, ${s.latestRelease.date ?? "?"})`
           : "",
+        s.concerts && s.concerts.length
+          ? `  Upcoming Spotify-federated concerts (from Bandsintown via Spotify):\n${s.concerts
+              .slice(0, 10)
+              .map((c) => `    - ${c.date} | ${c.venue} | ${c.city}`)
+              .join("\n")}`
+          : "",
       ]
         .filter(Boolean)
         .join("\n") || "(no Spotify data)"
@@ -169,14 +175,15 @@ ${socialBlock}
 CRITICAL GROUNDING RULE: Only state facts that appear in the data blocks above. Do NOT use your training knowledge about this artist. If the data blocks are sparse, your summary should also be sparse — say "limited recent data" rather than inventing specifics. Never name a venue, city, date, or tour that doesn't appear verbatim above.
 
 INSTRUCTIONS:
-1. Extract structured UPCOMING events ONLY from the Bandsintown markdown (date + venue + city). Skip past dates. If unclear whether a date is upcoming, omit it.
-2. Choose signals based ONLY on what's in the data:
-   - "active-touring": 3+ past gigs in last 90 days from setlist.fm OR upcoming dates in Bandsintown markdown
+1. Extract structured UPCOMING events from the Bandsintown markdown if present (date + venue + city). Skip past dates. The orchestrator will merge these with Ticketmaster + Spotify-federated events post-synthesis, so don't worry about duplicating them.
+2. Choose signals based ONLY on what's in the data. Consider events from ALL THREE upcoming sources (Ticketmaster, Spotify-federated concerts, Bandsintown markdown) when judging tour activity:
+   - "active-touring": 3+ past gigs in last 90 days from setlist.fm, OR 1+ upcoming dates listed in ANY of the upcoming-events sources above (Ticketmaster, Spotify-federated, or Bandsintown markdown)
    - "recent-release": release date in the LAST 30 DAYS OR an UPCOMING release date in the NEXT 90 DAYS appears in the releases list. (Tight window — not "any release in last 90 days".)
-   - "between-cycles": releases exist outside the 30d-past/90d-future window but no past gigs in 90d AND no upcoming tours
-   - "industry-writer": only singles in release list / no live activity / low Bandsintown followers / low Spotify monthly listeners
-   - "quiet": no releases in 12+ months AND no past gigs in 90d
+   - "between-cycles": releases exist outside the 30d-past/90d-future window AND no past gigs in 90d AND no upcoming tours in any source
+   - "industry-writer": only singles in release list / no live activity / low Spotify monthly listeners (<5k)
+   - "quiet": no releases in 12+ months AND no past gigs in 90d AND no upcoming dates anywhere
    - "new-artist": very sparse data overall (< 2 releases, < 1k Spotify monthly listeners)
+   An artist can have MULTIPLE signals — e.g. an artist with a recent release AND upcoming tour dates gets BOTH "recent-release" AND "active-touring".
 3. Summary: one tight sentence using only facts above. If data is sparse, say "limited recent data" — do not pad.
 4. Notes: optional but ONLY facts visible above. No training-data recall.
 
