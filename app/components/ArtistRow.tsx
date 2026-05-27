@@ -137,13 +137,13 @@ export function ArtistRow({
           className="mono text-right hidden sm:block"
           title="Monthly listeners: unique Spotify users in the last 28 days who played any of the artist's tracks. Shown on the artist's public Spotify profile."
         >
-          {report.spotify?.monthlyListeners !== undefined ? (
+          {typeof report.spotify?.monthlyListeners === "number" ? (
             <>
               <div>{report.spotify.monthlyListeners.toLocaleString()}</div>
               <div className="text-ink/40">MONTHLY LISTENERS</div>
               <div className="text-ink/30 text-[0.6rem]">UNIQUE · 28D</div>
             </>
-          ) : report.followers !== undefined ? (
+          ) : typeof report.followers === "number" ? (
             <>
               <div>{report.followers.toLocaleString()}</div>
               <div className="text-ink/40">BANDSINTOWN FOLLOWERS</div>
