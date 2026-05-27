@@ -176,14 +176,15 @@ CRITICAL GROUNDING RULE: Only state facts that appear in the data blocks above. 
 
 INSTRUCTIONS:
 1. Extract structured UPCOMING events from the Bandsintown markdown if present (date + venue + city). Skip past dates. The orchestrator will merge these with Ticketmaster + Spotify-federated events post-synthesis, so don't worry about duplicating them.
-2. Choose signals based ONLY on what's in the data. Consider events from ALL THREE upcoming sources (Ticketmaster, Spotify-federated concerts, Bandsintown markdown) when judging tour activity:
-   - "active-touring": 3+ past gigs in last 90 days from setlist.fm, OR 1+ upcoming dates listed in ANY of the upcoming-events sources above (Ticketmaster, Spotify-federated, or Bandsintown markdown)
-   - "recent-release": release date in the LAST 30 DAYS OR an UPCOMING release date in the NEXT 90 DAYS appears in the releases list. (Tight window — not "any release in last 90 days".)
-   - "between-cycles": releases exist outside the 30d-past/90d-future window AND no past gigs in 90d AND no upcoming tours in any source
-   - "industry-writer": only singles in release list / no live activity / low Spotify monthly listeners (<5k)
+2. Choose signals based ONLY on what's in the data. Consider events from ALL THREE upcoming sources (Ticketmaster, Spotify-federated concerts, Bandsintown markdown) when judging tour activity. When the Spotify section says "(Spotify sidecar unreachable)" or similar, treat listener-count rules as "unknown — do not exclude" rather than skipping the rule entirely.
+   - "active-touring": 3+ past gigs in last 90 days from setlist.fm, OR 1+ upcoming dates listed in ANY upcoming-events source (Ticketmaster, Spotify-federated, Bandsintown markdown)
+   - "recent-release": release date in the LAST 30 DAYS appears in the releases list OR Spotify's latest-release date is within the last 30 days. (Tight window — not "any release in last 90 days".)
+   - "between-cycles": releases exist outside the last 30 days window AND no past gigs in 90d AND no upcoming tours in any source
+   - "industry-writer": ONLY singles in release list (no albums/EPs) AND no live activity AND (Spotify monthly listeners <5k OR Spotify unknown)
    - "quiet": no releases in 12+ months AND no past gigs in 90d AND no upcoming dates anywhere
-   - "new-artist": very sparse data overall (< 2 releases, < 1k Spotify monthly listeners)
-   An artist can have MULTIPLE signals — e.g. an artist with a recent release AND upcoming tour dates gets BOTH "recent-release" AND "active-touring".
+   - "new-artist": <2 releases total AND (Spotify monthly listeners <1k OR Spotify unknown) AND no past gigs AND no upcoming dates
+   An artist can have MULTIPLE signals — e.g. recent release + tour dates → BOTH "recent-release" AND "active-touring".
+   FALLBACK: If after evaluating all six rules NONE apply, choose the single best-fitting one — never return an empty signals array. Default to "between-cycles" when data shows ANY activity (even just Spotify listeners or a release outside the recent window); default to "quiet" only when everything is genuinely empty.
 3. Summary: one tight sentence using only facts above. If data is sparse, say "limited recent data" — do not pad.
 4. Notes: optional but ONLY facts visible above. No training-data recall.
 

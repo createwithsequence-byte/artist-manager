@@ -44,7 +44,7 @@ export function ExportSection({ reports, totalArtists }: Props) {
   >({ kind: "idle" });
 
   const reportsWithDive = reports.filter(
-    (r) => r.deepDive && r.deepDive.facts.length > 0,
+    (r) => r.deepDive && (r.deepDive.facts?.length ?? 0) > 0,
   );
 
   const postDiveBriefing = async () => {

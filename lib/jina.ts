@@ -21,10 +21,17 @@ export async function fetchReadable(
       headers,
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[JINA] ${url} → HTTP ${res.status}`);
+      return null;
+    }
     const text = await res.text();
     return text.slice(0, opts.maxChars ?? 8000);
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[JINA] ${url}:`,
+      err instanceof Error ? err.message : String(err),
+    );
     return null;
   } finally {
     clearTimeout(timer);

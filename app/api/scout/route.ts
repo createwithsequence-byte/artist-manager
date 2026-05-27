@@ -74,10 +74,12 @@ async function processArtist(
 
   try {
     send({ type: "step", artist: name, step: "musicbrainz" });
+    // Pass CSV's Spotify URL so MB requires url-relationship match — kills
+    // "Tori" → "Tori Kelly" identity poisoning.
     const mbMatch = await soft(
       "musicbrainz",
       name,
-      () => findArtist(name),
+      () => findArtist(name, input.spotifyUrl),
       null,
     );
     const mbid = mbMatch?.mbid ?? null;
@@ -207,13 +209,26 @@ async function processArtist(
       city: c.city,
       ticketUrl: c.concertUrl,
     }));
+    // Dedup key normalization: TM emits "Nashville, TN", Spotify emits just
+    // "Nashville". Same show would appear twice. Strip trailing state code,
+    // lowercase, collapse whitespace. Keying on (date + venue) alone is
+    // tempting but venue spellings differ across sources too — including
+    // normalized city as a tiebreaker still catches the common case.
+    const normCity = (c: string) =>
+      c
+        .toLowerCase()
+        .replace(/,\s*[a-z]{2}(?:\s+\d{5})?$/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const normVenue = (v: string) =>
+      v.toLowerCase().replace(/\s+/g, " ").trim();
     const seen = new Set<string>();
     const mergedEvents = [
       ...ticketmasterEvents,
       ...spotifyConcerts,
       ...(synth.events ?? []),
     ].filter((e) => {
-      const key = `${e.date}|${e.venue}|${e.city}`.toLowerCase();
+      const key = `${e.date}|${normVenue(e.venue ?? "")}|${normCity(e.city ?? "")}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -276,12 +291,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = (await req.json()) as {
-    artists: ArtistInput[];
-    withSocials?: boolean;
-  };
-  const artists = (body.artists || []).filter((a) => a?.name?.trim());
+  let body: { artists?: ArtistInput[]; withSocials?: boolean };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  const artists = (Array.isArray(body.artists) ? body.artists : []).filter(
+    (a) => a?.name?.trim(),
+  );
   const withSocials = !!body.withSocials;
+
+  // Sidecar pre-warm: Render free tier spins down after 15min idle. First
+  // /artist call cold-starts ~30s, exceeding our TS-side 20s fetch timeout,
+  // which silently nulls the first 1-2 artists' Spotify data → their synth
+  // rules can't fire → empty signals. Fire-and-forget /health hit (with a
+  // generous 45s timeout) wakes the dyno before the worker pool starts.
+  const sidecarUrl = process.env.SPOTIFY_SIDECAR_URL;
+  if (sidecarUrl) {
+    fetch(`${sidecarUrl}/health`, {
+      signal: AbortSignal.timeout(45000),
+    }).catch((err) => {
+      console.warn(
+        "[SIDECAR_PREWARM]",
+        err instanceof Error ? err.message : err,
+      );
+    });
+  }
 
   if (artists.length === 0) {
     return new Response(JSON.stringify({ error: "No artists provided" }), {

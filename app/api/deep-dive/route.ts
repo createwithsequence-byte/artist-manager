@@ -10,13 +10,18 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "GEMINI_API_KEY not set" }, { status: 500 });
   }
 
-  const body = (await req.json()) as {
+  let body: {
     name?: string;
     location?: ArtistLocation;
     spotifyId?: string;
     bandsintownUrl?: string;
     spotify?: SpotifyInfo;
   };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
   const name = body.name?.trim();
   if (!name) {
     return Response.json({ error: "name required" }, { status: 400 });

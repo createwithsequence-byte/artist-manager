@@ -62,6 +62,26 @@ export default function Home() {
   >("unknown");
   const tursoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Recent runs picker — populated from /api/csvs so coworkers can browse
+  // previously-scouted rosters without having the source CSV handy.
+  const [recentCsvs, setRecentCsvs] = useState<
+    { csv_name: string; artist_count: number; last_updated: string }[]
+  >([]);
+
+  useEffect(() => {
+    fetch("/api/csvs")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d?.csvs)) setRecentCsvs(d.csvs);
+      })
+      .catch((err) =>
+        console.warn(
+          "[RECENT_CSVS]",
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+  }, []);
+
   // Batch deep-dive state
   const [diveBatch, setDiveBatch] = useState<{
     running: boolean;
@@ -290,7 +310,10 @@ export default function Home() {
       setActiveArtist(event.artist);
       setActiveStep(event.step);
     } else if (event.type === "report") {
-      setReports((prev) => [...prev, event.report]);
+      // Normalize even streamed reports — if /api/scout ever emits one
+      // missing a required array field (synth stub, partial response, etc.),
+      // ArtistRow rendering would crash and blank the page.
+      setReports((prev) => [...prev, normalizeReport(event.report)]);
     } else if (event.type === "error") {
       setErrors((prev) => [
         ...prev,
@@ -575,7 +598,7 @@ export default function Home() {
         }}
       />
 
-      {!rows && (
+      {!rows && !hasResults && (
         <section className="px-5 py-12 md:py-20">
           <div className="max-w-5xl">
             <h1 className="display text-6xl md:text-8xl lg:text-9xl leading-[0.85] mb-6">
@@ -610,6 +633,46 @@ export default function Home() {
                 COLUMN
               </div>
             </label>
+
+            {recentCsvs.length > 0 && (
+              <div className="mt-10">
+                <div className="mono text-ink/50 mb-3">
+                  ↳ OR OPEN A PREVIOUS RUN
+                </div>
+                <div className="space-y-px">
+                  {recentCsvs.map((c) => (
+                    <button
+                      key={c.csv_name}
+                      onClick={() => {
+                        // Set fileName — the existing hydration useEffect
+                        // (depends on cacheKey/fileName) picks this up and
+                        // loads the saved reports from Turso. No need to
+                        // re-parse the source CSV; rows stays null which
+                        // hides the upload UI naturally via the
+                        // {!rows && hasResults check below.
+                        setFileName(c.csv_name);
+                      }}
+                      className="w-full text-left flex items-baseline gap-4 px-4 py-3 border-b border-ink/10 hover:bg-ink/[0.04] transition-colors group"
+                    >
+                      <span className="font-medium truncate flex-1">
+                        {c.csv_name}
+                      </span>
+                      <span className="mono text-ink/60 shrink-0">
+                        {c.artist_count} ARTISTS
+                      </span>
+                      <span className="mono text-ink/35 shrink-0 hidden sm:inline">
+                        {c.last_updated
+                          ? new Date(c.last_updated).toISOString().slice(0, 10)
+                          : ""}
+                      </span>
+                      <span className="mono text-ink/40 group-hover:text-red shrink-0">
+                        →
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-6 max-w-3xl">
               {[
@@ -717,7 +780,7 @@ export default function Home() {
                     f.key === "all"
                       ? reports.length
                       : reports.filter((r) =>
-                          r.signals.includes(f.key as Signal),
+                          (r.signals ?? []).includes(f.key as Signal),
                         ).length;
                   if (f.key !== "all" && count === 0) return null;
                   const active = filter === f.key;
@@ -739,7 +802,9 @@ export default function Home() {
                   if (diveBatch.running) return null;
                   const needsDive = filteredReports.filter((r) => !r.deepDive);
                   const activeTouringNoDive = reports.filter(
-                    (r) => r.signals.includes("active-touring") && !r.deepDive,
+                    (r) =>
+                      (r.signals ?? []).includes("active-touring") &&
+                      !r.deepDive,
                   );
                   const cap = 50;
                   return (

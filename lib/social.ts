@@ -5,7 +5,11 @@ async function scrape(url: string, delay = 5000): Promise<string> {
   try {
     const resp = await steelScrape(url, ["html"], delay);
     return resp.content.html || "";
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[SOCIAL] ${url}:`,
+      err instanceof Error ? err.message : String(err),
+    );
     return "";
   }
 }

@@ -39,6 +39,7 @@ export async function steelScrape(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ url, format, delay }),
+    signal: AbortSignal.timeout(25000),
   });
 
   if (res.status === 429 && retries > 0) {
@@ -95,7 +96,13 @@ export async function findBandsintownArtist(
       url: (a.href || "").split("?")[0],
       verified: !!a.verified,
     };
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[BANDSINTOWN] parse failed for "${query}":`,
+      err instanceof Error ? err.message : String(err),
+      "chunk:",
+      chunk.slice(0, 200),
+    );
     return null;
   }
 }

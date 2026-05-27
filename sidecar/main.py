@@ -179,10 +179,17 @@ def _extract_concerts(goods: dict) -> list[dict]:
     Extract upcoming concerts from artistUnion.goods.concerts.
     Spotify federates this data from Bandsintown (their partner), so we
     effectively get Bandsintown's indie tour coverage via Spotify's API.
+
+    Filters out past concerts — Spotify's response includes recently-played
+    shows alongside upcoming ones. Without this filter, "UPCOMING" sections
+    in the UI show 2024 dates as if they were future shows.
     """
+    from datetime import datetime, timezone
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     items = safe_get(goods, "concerts", "items", default=[]) or []
     out: list[dict] = []
-    for it in items[:40]:
+    for it in items[:60]:
         d = it.get("data") if isinstance(it, dict) else None
         if not isinstance(d, dict):
             continue
@@ -194,7 +201,7 @@ def _extract_concerts(goods: dict) -> list[dict]:
             or safe_get(d, "date", "isoString")
         )
         date = (iso or "")[:10] if iso else None
-        if not date:
+        if not date or date < today:
             continue
         out.append({
             "date": date,

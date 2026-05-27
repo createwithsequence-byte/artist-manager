@@ -1,16 +1,17 @@
-import type { ArtistReport } from "./types";
+import type { ArtistReport, DeepDive } from "./types";
 
 /**
- * Ensure a cached ArtistReport has every required array field.
+ * Ensure a cached ArtistReport has every required array/string field.
  *
  * Old cached reports in localStorage / Turso may predate fields that became
- * required later (events, releases, signals). Without this, ArtistRow's
- * `report.events.length` etc. throws "Cannot read properties of undefined"
- * and Next.js's global error boundary blanks the page.
+ * required later (events, releases, signals, deepDive sub-fields). Without
+ * this, ArtistRow's `report.events.length` / `dive.facts.map` etc. throws
+ * "Cannot read properties of undefined" and Next.js's global error boundary
+ * blanks the page.
  *
  * Run this at every external hydration boundary (Turso fetch, localStorage
- * read). In-app state mutations don't need it — those reports always come
- * from the synthesizer which guarantees full shape.
+ * read, AND the streaming /api/scout consumer in app/page.tsx) — in-app
+ * state mutations don't need it.
  */
 export function normalizeReport(r: ArtistReport): ArtistReport {
   return {
@@ -18,11 +19,25 @@ export function normalizeReport(r: ArtistReport): ArtistReport {
     signals: r.signals ?? [],
     events: r.events ?? [],
     releases: r.releases ?? [],
-    // summary is required-string in type, but be defensive against legacy
-    // entries that somehow lost it (we'd rather show empty than crash).
     summary: r.summary ?? "",
-    // name is the cache key — if it's missing, the row is unrecoverable.
-    // Leave name alone; React will at least render *something* with an
-    // empty string and the user can re-run that artist.
+    deepDive: r.deepDive ? normalizeDeepDive(r.deepDive) : undefined,
+  };
+}
+
+/**
+ * Defensive normalize for DeepDive — runs whenever a cached report is loaded.
+ * Older reports may have a deepDive missing facts/sourcesChecked arrays or
+ * with an undefined context string; this prevents ArtistRow's expanded
+ * deep-dive panel from crashing during render.
+ */
+function normalizeDeepDive(dive: DeepDive): DeepDive {
+  return {
+    ...dive,
+    artist: dive.artist ?? "",
+    context: dive.context ?? "",
+    facts: dive.facts ?? [],
+    sourcesChecked: dive.sourcesChecked ?? [],
+    sourcesRejected: dive.sourcesRejected ?? [],
+    generatedAt: dive.generatedAt ?? new Date(0).toISOString(),
   };
 }

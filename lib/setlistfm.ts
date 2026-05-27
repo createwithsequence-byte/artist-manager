@@ -41,8 +41,9 @@ export async function getRecentGigs(
       headers: {
         "x-api-key": key,
         Accept: "application/json",
-        "User-Agent": "ArtistManager/0.1",
+        "User-Agent": `ArtistManager/0.1 (${process.env.MUSICBRAINZ_CONTACT || "contact@example.com"})`,
       },
+      signal: AbortSignal.timeout(15000),
     });
     if (res.status === 404) return [];
     if (!res.ok) throw new Error(`setlist.fm ${res.status}`);

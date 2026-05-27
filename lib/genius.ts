@@ -45,10 +45,18 @@ async function geniusFetch<T>(path: string): Promise<T | null> {
   try {
     const res = await fetch(`${BASE}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(12000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`[GENIUS] ${path} → HTTP ${res.status}`);
+      return null;
+    }
     return (await res.json()) as T;
-  } catch {
+  } catch (err) {
+    console.warn(
+      `[GENIUS] ${path}:`,
+      err instanceof Error ? err.message : String(err),
+    );
     return null;
   }
 }

@@ -38,10 +38,12 @@ export async function POST(req: NextRequest) {
   if (!isTursoConfigured()) {
     return Response.json({ error: "Turso not configured" }, { status: 503 });
   }
-  const body = (await req.json()) as {
-    csv_name?: string;
-    reports?: ArtistReport[];
-  };
+  let body: { csv_name?: string; reports?: ArtistReport[] };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
   if (!body.csv_name) {
     return Response.json({ error: "csv_name required" }, { status: 400 });
   }

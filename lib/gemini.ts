@@ -29,8 +29,18 @@ const GEMINI_CHAIN = [
   "gemini-2.0-flash-lite",
 ];
 
-// Groq fallback model — 14,400 RPD on free tier, OpenAI-compatible tool API.
-const GROQ_FALLBACK_MODEL = "llama-3.3-70b-versatile";
+// Groq fallback chain — each model has its OWN token-per-day quota, so chaining
+// them multiplies our daily capacity. Order: smartest first, then ramp down.
+// 3.3-70b: best quality, 100k TPD
+// 3.1-8b-instant: fast/light, separate ~500k TPD pool
+// mixtral-8x7b: 175k TPD
+// gemma2-9b-it: 500k TPD
+const GROQ_CHAIN = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "mixtral-8x7b-32768",
+  "gemma2-9b-it",
+];
 
 function isDailyQuotaError(msg: string): boolean {
   return (
@@ -88,6 +98,17 @@ function promptFromGeminiArgs(args: GeminiArgs): string {
  * Re-shapes the response to look like a Gemini `GenerateContentResponse` so
  * callers don't need to know which provider answered.
  */
+function isGroqRateLimitError(msg: string): boolean {
+  return (
+    msg.includes("429") ||
+    msg.includes("Rate limit") ||
+    msg.includes("rate_limit") ||
+    msg.includes("tokens per day") ||
+    msg.includes("TPD") ||
+    msg.includes("RPD")
+  );
+}
+
 async function callGroq(args: GeminiArgs): Promise<GenerateContentResponse> {
   const groq = groqClient();
   if (!groq) throw new Error("No Groq client (GROQ_API_KEY not set)");
@@ -104,30 +125,59 @@ async function callGroq(args: GeminiArgs): Promise<GenerateContentResponse> {
       ? "\n\nReturn ONLY a JSON object (no markdown fences, no prose)."
       : "";
 
-  const completion = await groq.chat.completions.create({
-    model: GROQ_FALLBACK_MODEL,
-    messages: [{ role: "user", content: prompt + schemaHint }],
-    response_format: wantsJson ? { type: "json_object" } : undefined,
-    temperature:
-      typeof args.config?.temperature === "number"
-        ? args.config.temperature
-        : 0.3,
-    max_completion_tokens: 4096,
-  });
+  // Try each Groq model in order — each has its own separate TPD quota, so a
+  // chain dramatically multiplies our daily capacity vs. a single model.
+  let lastGroqErr: unknown = null;
+  for (const model of GROQ_CHAIN) {
+    try {
+      // gemma2 and mixtral don't support response_format json_object — only
+      // llama variants do. Send the schema hint in prompt instead.
+      const supportsJsonMode = model.startsWith("llama");
+      const completion = await groq.chat.completions.create({
+        model,
+        messages: [{ role: "user", content: prompt + schemaHint }],
+        response_format:
+          wantsJson && supportsJsonMode ? { type: "json_object" } : undefined,
+        temperature:
+          typeof args.config?.temperature === "number"
+            ? args.config.temperature
+            : 0.3,
+        max_completion_tokens: 4096,
+      });
 
-  const text = completion.choices[0]?.message?.content ?? "";
+      const text = completion.choices[0]?.message?.content ?? "";
+      if (!text) {
+        lastGroqErr = new Error(`Groq ${model} returned empty content`);
+        continue;
+      }
 
-  // Shape minimally compatible with what callers read off Gemini's response.
-  return {
-    text,
-    candidates: [
-      {
-        content: { parts: [{ text }], role: "model" },
-        finishReason: "STOP",
-        index: 0,
-      },
-    ],
-  } as unknown as GenerateContentResponse;
+      console.warn(`[GROQ] answered via ${model}`);
+      return {
+        text,
+        candidates: [
+          {
+            content: { parts: [{ text }], role: "model" },
+            finishReason: "STOP",
+            index: 0,
+          },
+        ],
+      } as unknown as GenerateContentResponse;
+    } catch (err) {
+      lastGroqErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (isGroqRateLimitError(msg)) {
+        console.warn(`[GROQ] ${model} rate-limited, trying next model`);
+        continue;
+      }
+      // Non-rate-limit error (auth, model deprecated, etc.) — try next anyway
+      // since the chain's whole point is resilience.
+      console.warn(
+        `[GROQ] ${model} failed (${msg.slice(0, 120)}), trying next model`,
+      );
+    }
+  }
+
+  throw lastGroqErr ?? new Error("All Groq models in chain failed");
 }
 
 /**

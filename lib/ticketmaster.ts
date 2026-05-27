@@ -46,16 +46,34 @@ async function tm<T>(path: string): Promise<T | null> {
   try {
     const res = await fetch(`${BASE}${path}${sep}apikey=${key}`, {
       headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(12000),
     });
     if (res.status === 429) {
       // Rate limited — back off briefly and retry once
       await new Promise((r) => setTimeout(r, 1500));
       await waitForSlot();
-      const retry = await fetch(`${BASE}${path}${sep}apikey=${key}`);
-      if (!retry.ok) return null;
-      return (await retry.json()) as T;
+      const retry = await fetch(`${BASE}${path}${sep}apikey=${key}`, {
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!retry.ok) {
+        console.warn(`[TICKETMASTER] retry after 429 → HTTP ${retry.status}`);
+        return null;
+      }
+      try {
+        return (await retry.json()) as T;
+      } catch (parseErr) {
+        console.warn(
+          "[TICKETMASTER] retry response parse failed:",
+          parseErr instanceof Error ? parseErr.message : String(parseErr),
+        );
+        return null;
+      }
     }
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status !== 404)
+        console.warn(`[TICKETMASTER] HTTP ${res.status} on ${path}`);
+      return null;
+    }
     return (await res.json()) as T;
   } catch (err) {
     console.warn("[TICKETMASTER]", err instanceof Error ? err.message : err);
@@ -73,18 +91,29 @@ export async function findTicketmasterAttraction(
   const data = await tm<TMAttractionSearch>(
     `/attractions.json?keyword=${encodeURIComponent(name)}&classificationName=music&size=3`,
   );
-  const top = data?._embedded?.attractions?.[0];
-  if (!top) return null;
-  // Quick sanity: name must roughly match. Accept exact match, or any
-  // attraction where the searched name is a substring (covers "Tori" → "Tori Elliott").
   const lookupLc = name.toLowerCase().trim();
-  const topLc = top.name.toLowerCase();
-  if (topLc !== lookupLc && !topLc.includes(lookupLc)) {
-    // The top match has nothing to do with our artist. Could be a fuzzy
-    // Ticketmaster match to a famous artist — reject.
+  // Require EXACT case-insensitive match. The previous substring fallback
+  // caused identity poisoning: searching "Tori" matched "Tori Kelly", pulling
+  // Tori Kelly's stadium tour into a Songfinch indie's report. False matches
+  // on common first names ("Charlie", "Sarah", "Tate") were rampant.
+  // If the artist has a different stage name on TM, they won't show up here —
+  // that's correct behavior. Spotify-federated concerts catch indies.
+  const attractions = data?._embedded?.attractions ?? [];
+  const exact = attractions.find(
+    (a) => a.name?.toLowerCase().trim() === lookupLc,
+  );
+  if (!exact) {
+    if (attractions.length > 0) {
+      console.warn(
+        `[TM] rejected fuzzy matches for "${name}": ${attractions
+          .slice(0, 3)
+          .map((a) => a.name)
+          .join(", ")}`,
+      );
+    }
     return null;
   }
-  return { id: top.id, name: top.name };
+  return { id: exact.id, name: exact.name };
 }
 
 /**
