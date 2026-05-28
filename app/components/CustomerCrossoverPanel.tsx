@@ -168,7 +168,9 @@ function legDisplay(leg: Leg) {
 }
 
 function fmtDay(date: string): string {
-  const d = new Date(date);
+  // Parse at NOON so the YYYY-MM-DD (UTC-midnight) value doesn't shift back a
+  // day when rendered in a US timezone — the classic off-by-one.
+  const d = new Date(`${date}T12:00:00`);
   if (isNaN(d.getTime())) return date;
   return d
     .toLocaleDateString("en-US", {
