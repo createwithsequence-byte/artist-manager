@@ -66,6 +66,11 @@ const CODE_TO_NAME: Record<string, string> = Object.fromEntries(
   ]),
 );
 
+export type LatLng = readonly [number, number];
+/** "<lowercased city>|<STATE_CODE>" → [lat, lng]. Supplied by the dynamically
+ *  imported usCityToLatLng bundle so the 1MB dataset only loads on demand. */
+export type GeocodeMap = Readonly<Record<string, LatLng>>;
+
 export type Customer = {
   name?: string;
   city?: string;
@@ -75,25 +80,81 @@ export type Customer = {
   raw?: Record<string, string>;
 };
 
+/** A suggested net-new tour stop that sits roughly on-route between two
+ *  existing dates and has dense customer coverage. */
+export type RoutingSuggestion = {
+  city: string;
+  stateCode: string;
+  customers: number;
+  /** Extra miles vs. driving the two existing stops back-to-back. */
+  detourMiles: number;
+  gapDays: number;
+  fromCity: string;
+  fromDate: string;
+  toCity: string;
+  toDate: string;
+  /** A reasonable date to slot the show — midpoint of the gap. */
+  suggestedDate: string;
+  lat: number;
+  lng: number;
+};
+
 export type CustomerCrossover = {
   /** Total parseable customer rows (excludes ones missing state). */
   totalCustomers: number;
   /** Unique states represented in the customer list. */
   uniqueStates: number;
-  /** Customer rows dropped because their state couldn't be normalized
-   *  (empty, "USA", non-US country, misspelled). Surfaced in UI so the
-   *  user knows why their 4006-row CSV shows 3555 customers. */
+  /** Customer rows dropped because their state couldn't be normalized. */
   droppedCount: number;
+  /** Radius (miles) used for "within range" counts + corridor width. */
+  radiusMiles: number;
+  /** Whether lat/lng geocoding was available (false → state-level only). */
+  geocoded: boolean;
+  /** Unique customers within `radiusMiles` of ANY tour stop. */
+  reachedCustomers: number;
+  /** reachedCustomers / totalCustomers, 0–1. */
+  reachPct: number;
   /** Per-tour-stop matches. */
   perEvent: Array<{
     event: ArtistEvent;
     stateCode: string | null;
     sameStateCount: number;
     sameCityCount: number;
+    /** Customers within `radiusMiles` of this stop (0 if stop not geocoded). */
+    withinRadiusCount: number;
     sampleCustomers: Customer[];
+    lat?: number;
+    lng?: number;
   }>;
   /** Top customer states (for "where your audience is" sidebar). */
   topStates: Array<{ stateCode: string; stateName: string; count: number }>;
+  /** Suggested net-new stops to add between existing dates. */
+  routingSuggestions: RoutingSuggestion[];
+  /** Customer cities NOT reached by the current tour, ranked — "tour next." */
+  untappedMarkets: Array<{
+    city: string;
+    stateCode: string;
+    customers: number;
+    lat: number;
+    lng: number;
+  }>;
+  /** Pre-shaped data for the Leaflet map. */
+  mapData: {
+    customerPoints: Array<{ lat: number; lng: number; weight: number }>;
+    stops: Array<{
+      lat: number;
+      lng: number;
+      city: string;
+      date: string;
+      venue: string;
+    }>;
+    suggestions: Array<{
+      lat: number;
+      lng: number;
+      city: string;
+      customers: number;
+    }>;
+  };
 };
 
 /** Normalize state input to a 2-letter postal code, or null if unrecognized. */
@@ -101,15 +162,302 @@ export function normalizeState(input: string | undefined): string | null {
   if (!input) return null;
   const trimmed = input.trim();
   if (trimmed.length === 0) return null;
-  // Already a 2-letter code?
   if (/^[A-Z]{2}$/i.test(trimmed)) return trimmed.toUpperCase();
-  // Full name?
   const lower = trimmed.toLowerCase();
   return STATE_NAME_TO_CODE[lower] ?? null;
 }
 
 function normalizeCity(input: string | undefined): string {
   return (input ?? "").trim().toLowerCase();
+}
+
+/** Great-circle distance in miles between two [lat,lng] points. */
+function haversineMiles(a: LatLng, b: LatLng): number {
+  const R = 3958.8; // Earth radius, miles
+  const toRad = Math.PI / 180;
+  const dLat = (b[0] - a[0]) * toRad;
+  const dLng = (b[1] - a[1]) * toRad;
+  const la1 = a[0] * toRad;
+  const la2 = b[0] * toRad;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Whole days between two YYYY-MM-DD strings (absolute). */
+function dayGap(a: string, b: string): number {
+  const da = new Date(a).getTime();
+  const db = new Date(b).getTime();
+  if (Number.isNaN(da) || Number.isNaN(db)) return 0;
+  return Math.round(Math.abs(db - da) / 86_400_000);
+}
+
+/** Midpoint date (YYYY-MM-DD) between two dates. */
+function midDate(a: string, b: string): string {
+  const da = new Date(a).getTime();
+  const db = new Date(b).getTime();
+  if (Number.isNaN(da) || Number.isNaN(db)) return a;
+  return new Date((da + db) / 2).toISOString().slice(0, 10);
+}
+
+/**
+ * Resolve a tour event to a 2-letter state code using three tiers of
+ * confidence: explicit event.state → regex from "City, ST" → bundled
+ * city→state lookup for bare Spotify-federated city strings.
+ */
+function resolveEventState(event: ArtistEvent): string | null {
+  const cityField = event.city ?? "";
+  let stateCode: string | null = event.state
+    ? normalizeState(event.state)
+    : null;
+  if (!stateCode) {
+    const m = cityField.match(
+      /,\s*([A-Z]{2})\b|,\s*([A-Za-z][A-Za-z\s.]+?)\s*$/,
+    );
+    if (m) stateCode = m[1] ? m[1].toUpperCase() : normalizeState(m[2]);
+  }
+  if (!stateCode) {
+    const bare = cityField.split(",")[0].trim().toLowerCase();
+    const looked = US_CITY_TO_STATE[bare];
+    if (looked) stateCode = looked;
+  }
+  return stateCode;
+}
+
+const MIN_GAP_DAYS = 3; // need at least this long a gap to slot a show
+const MIN_SUGGESTION_CUSTOMERS = 3; // ignore trivially-small markets
+const MAX_SUGGESTIONS_PER_GAP = 3;
+
+/**
+ * Compute the intersection between an artist's upcoming events and a list of
+ * customer locations. State-level always; when a `geocode` map is supplied it
+ * additionally computes radius reach, between-stop routing suggestions, and
+ * map data — all client-side via haversine, no external API.
+ */
+export function crossover(
+  customers: Customer[],
+  events: ArtistEvent[],
+  opts: { radiusMiles?: number; geocode?: GeocodeMap } = {},
+): CustomerCrossover {
+  const radiusMiles = opts.radiusMiles ?? 60;
+  const geocode = opts.geocode;
+  const geocoded = !!geocode;
+
+  // Pre-normalize + geocode customers.
+  const normalized = customers.map((c) => {
+    const stateCode = normalizeState(c.state);
+    const cityKey = normalizeCity(c.city);
+    let coords: LatLng | undefined;
+    if (geocode && stateCode && cityKey) {
+      coords = geocode[`${cityKey}|${stateCode}`];
+    }
+    return { ...c, _stateCode: stateCode, _cityKey: cityKey, _coords: coords };
+  });
+  const withState = normalized.filter((c) => c._stateCode);
+
+  // Top customer states.
+  const stateBuckets = new Map<string, number>();
+  for (const c of withState) {
+    stateBuckets.set(c._stateCode!, (stateBuckets.get(c._stateCode!) ?? 0) + 1);
+  }
+  const topStates = [...stateBuckets.entries()]
+    .map(([code, count]) => ({
+      stateCode: code,
+      stateName: CODE_TO_NAME[code] ?? code,
+      count,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // Aggregate customers by geocoded city for routing/untapped/heatmap.
+  type CityAgg = {
+    city: string;
+    stateCode: string;
+    count: number;
+    coords: LatLng;
+  };
+  const cityAggMap = new Map<string, CityAgg>();
+  for (const c of normalized) {
+    if (!c._coords || !c._stateCode || !c._cityKey) continue;
+    const key = `${c._cityKey}|${c._stateCode}`;
+    const existing = cityAggMap.get(key);
+    if (existing) existing.count += 1;
+    else
+      cityAggMap.set(key, {
+        city: c.city ?? c._cityKey,
+        stateCode: c._stateCode,
+        count: 1,
+        coords: c._coords,
+      });
+  }
+  const cityAggs = [...cityAggMap.values()];
+
+  // Geocode events + per-event analysis.
+  const eventsGeo = events.map((event) => {
+    const stateCode = resolveEventState(event);
+    const bareCity = (event.city ?? "").split(",")[0].trim().toLowerCase();
+    let coords: LatLng | undefined;
+    if (geocode && stateCode && bareCity) {
+      coords = geocode[`${bareCity}|${stateCode}`];
+    }
+    return { event, stateCode, bareCity, coords };
+  });
+
+  // Track which customers are reached (within radius of any geocoded stop).
+  const reachedIdx = new Set<number>();
+
+  const perEvent = eventsGeo.map(({ event, stateCode, bareCity, coords }) => {
+    const sameState = stateCode
+      ? withState.filter((c) => c._stateCode === stateCode)
+      : [];
+    const sameCity = stateCode
+      ? sameState.filter((c) => c._cityKey === bareCity)
+      : [];
+
+    let withinRadiusCount = 0;
+    if (coords) {
+      normalized.forEach((c, idx) => {
+        if (!c._coords) return;
+        if (haversineMiles(coords, c._coords) <= radiusMiles) {
+          withinRadiusCount += 1;
+          reachedIdx.add(idx);
+        }
+      });
+    }
+
+    return {
+      event,
+      stateCode,
+      sameStateCount: sameState.length,
+      sameCityCount: sameCity.length,
+      withinRadiusCount,
+      sampleCustomers:
+        sameCity.slice(0, 5).length > 0
+          ? sameCity.slice(0, 5)
+          : sameState.slice(0, 5),
+      lat: coords?.[0],
+      lng: coords?.[1],
+    };
+  });
+
+  const reachedCustomers = reachedIdx.size;
+  const reachPct =
+    normalized.length > 0 ? reachedCustomers / normalized.length : 0;
+
+  // ---- Routing engine: insertion-cost detour between consecutive stops ----
+  const datedStops = eventsGeo
+    .filter((e) => e.coords && e.event.date)
+    .sort((a, b) => (a.event.date < b.event.date ? -1 : 1));
+
+  const maxDetour = radiusMiles * 2; // city within ~radius of the A→B line
+  const routingSuggestions: RoutingSuggestion[] = [];
+  const suggestedCityKeys = new Set<string>();
+
+  for (let i = 0; i < datedStops.length - 1; i++) {
+    const A = datedStops[i];
+    const B = datedStops[i + 1];
+    const gap = dayGap(A.event.date, B.event.date);
+    if (gap < MIN_GAP_DAYS) continue;
+    const directMiles = haversineMiles(A.coords!, B.coords!);
+
+    const candidates = cityAggs
+      .map((agg) => {
+        const detour =
+          haversineMiles(A.coords!, agg.coords) +
+          haversineMiles(agg.coords, B.coords!) -
+          directMiles;
+        return { agg, detour };
+      })
+      .filter(
+        ({ agg, detour }) =>
+          detour <= maxDetour &&
+          agg.count >= MIN_SUGGESTION_CUSTOMERS &&
+          // Skip cities already served by an existing stop this gap touches.
+          haversineMiles(A.coords!, agg.coords) > radiusMiles &&
+          haversineMiles(B.coords!, agg.coords) > radiusMiles,
+      )
+      // Rank: most customers per unit of detour (the artist-beneficial stop).
+      .sort(
+        (x, y) => y.agg.count / (1 + y.detour) - x.agg.count / (1 + x.detour),
+      )
+      .slice(0, MAX_SUGGESTIONS_PER_GAP);
+
+    for (const { agg, detour } of candidates) {
+      const key = `${agg.city.toLowerCase()}|${agg.stateCode}`;
+      if (suggestedCityKeys.has(key)) continue; // dedupe across gaps
+      suggestedCityKeys.add(key);
+      routingSuggestions.push({
+        city: agg.city,
+        stateCode: agg.stateCode,
+        customers: agg.count,
+        detourMiles: Math.round(detour),
+        gapDays: gap,
+        fromCity: A.event.city ?? "?",
+        fromDate: A.event.date,
+        toCity: B.event.city ?? "?",
+        toDate: B.event.date,
+        suggestedDate: midDate(A.event.date, B.event.date),
+        lat: agg.coords[0],
+        lng: agg.coords[1],
+      });
+    }
+  }
+
+  // ---- Untapped markets: dense customer cities NOT within radius of a stop --
+  const stopCoords = eventsGeo
+    .map((e) => e.coords)
+    .filter((c): c is LatLng => !!c);
+  const untappedMarkets = cityAggs
+    .filter(
+      (agg) =>
+        !stopCoords.some((sc) => haversineMiles(sc, agg.coords) <= radiusMiles),
+    )
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+    .map((agg) => ({
+      city: agg.city,
+      stateCode: agg.stateCode,
+      customers: agg.count,
+      lat: agg.coords[0],
+      lng: agg.coords[1],
+    }));
+
+  return {
+    totalCustomers: normalized.length,
+    uniqueStates: stateBuckets.size,
+    droppedCount: normalized.length - withState.length,
+    radiusMiles,
+    geocoded,
+    reachedCustomers,
+    reachPct,
+    perEvent,
+    topStates,
+    routingSuggestions,
+    untappedMarkets,
+    mapData: {
+      customerPoints: cityAggs.map((a) => ({
+        lat: a.coords[0],
+        lng: a.coords[1],
+        weight: a.count,
+      })),
+      stops: eventsGeo
+        .filter((e) => e.coords)
+        .map((e) => ({
+          lat: e.coords![0],
+          lng: e.coords![1],
+          city: e.event.city ?? "?",
+          date: e.event.date,
+          venue: e.event.venue ?? "Venue TBD",
+        })),
+      suggestions: routingSuggestions.map((s) => ({
+        lat: s.lat,
+        lng: s.lng,
+        city: s.city,
+        customers: s.customers,
+      })),
+    },
+  };
 }
 
 /**
@@ -142,99 +490,4 @@ function extractCustomer(row: Record<string, string>): Customer {
 /** Parse a raw CSV row list into normalized Customer objects. */
 export function parseCustomers(rows: Record<string, string>[]): Customer[] {
   return rows.map(extractCustomer).filter((c) => c.state || c.city);
-}
-
-/**
- * Compute the intersection between an artist's upcoming events and a list
- * of customer locations. State-level only (no geocoding yet).
- */
-export function crossover(
-  customers: Customer[],
-  events: ArtistEvent[],
-): CustomerCrossover {
-  // Pre-normalize customers
-  const normalized = customers.map((c) => ({
-    ...c,
-    _stateCode: normalizeState(c.state),
-    _cityKey: normalizeCity(c.city),
-  }));
-
-  const withState = normalized.filter((c) => c._stateCode);
-
-  // Aggregate top states
-  const stateBuckets = new Map<string, number>();
-  for (const c of withState) {
-    stateBuckets.set(c._stateCode!, (stateBuckets.get(c._stateCode!) ?? 0) + 1);
-  }
-  const topStates = [...stateBuckets.entries()]
-    .map(([code, count]) => ({
-      stateCode: code,
-      stateName: CODE_TO_NAME[code] ?? code,
-      count,
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
-
-  // Per-event analysis
-  const perEvent = events.map((event) => {
-    // Three-tier state extraction, in order of confidence:
-    //   1. event.state — explicit field from Ticketmaster + (future-Spotify)
-    //   2. Regex-extract from city — works for "Cohasset, MA" composite strings
-    //   3. US_CITY_TO_STATE bundled lookup — covers Spotify-federated concerts
-    //      whose city field is bare ("Spring Hill", "Nashville"). 14,722 cities
-    //      covered including hand-resolved high-volume touring markets. Cities
-    //      that are genuinely ambiguous (Franklin, Madison without venue
-    //      disambiguation) intentionally don't resolve here — they stay
-    //      "0 IN ?" rather than guess wrong.
-    const cityField = event.city ?? "";
-    let stateCode: string | null = event.state
-      ? normalizeState(event.state)
-      : null;
-    if (!stateCode) {
-      const stateMatch = cityField.match(
-        /,\s*([A-Z]{2})\b|,\s*([A-Za-z][A-Za-z\s.]+?)\s*$/,
-      );
-      if (stateMatch) {
-        stateCode = stateMatch[1]
-          ? stateMatch[1].toUpperCase()
-          : normalizeState(stateMatch[2]);
-      }
-    }
-    if (!stateCode) {
-      // Lookup bare city name. The split-on-comma + trim handles edge cases
-      // where the city accidentally has a trailing string we don't recognize
-      // (e.g. "Nashville " or "Nashville, ").
-      const bare = cityField.split(",")[0].trim().toLowerCase();
-      const lookedUp = US_CITY_TO_STATE[bare];
-      if (lookedUp) stateCode = lookedUp;
-    }
-    // Pull just the city name part for city-match attempts
-    const cityPart = cityField.split(",")[0].trim().toLowerCase();
-
-    const sameState = stateCode
-      ? withState.filter((c) => c._stateCode === stateCode)
-      : [];
-    const sameCity = stateCode
-      ? sameState.filter((c) => c._cityKey === cityPart)
-      : [];
-
-    return {
-      event,
-      stateCode,
-      sameStateCount: sameState.length,
-      sameCityCount: sameCity.length,
-      sampleCustomers:
-        sameCity.slice(0, 5).length > 0
-          ? sameCity.slice(0, 5)
-          : sameState.slice(0, 5),
-    };
-  });
-
-  return {
-    totalCustomers: normalized.length,
-    uniqueStates: stateBuckets.size,
-    droppedCount: normalized.length - withState.length,
-    perEvent,
-    topStates,
-  };
 }

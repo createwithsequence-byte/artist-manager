@@ -1,34 +1,40 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Papa from "papaparse";
 import {
   crossover,
   parseCustomers,
   type Customer,
   type CustomerCrossover,
+  type GeocodeMap,
 } from "@/lib/customerCrossover";
 import type { Event as ArtistEvent } from "@/lib/types";
 
-type Props = {
-  events: ArtistEvent[];
-  artistName: string;
-};
+// Leaflet touches `window`, so the map can't server-render. Lazy + ssr:false.
+const TourMap = dynamic(() => import("./TourMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[360px] md:h-[440px] border border-ink/15 flex items-center justify-center mono text-ink/40">
+      LOADING MAP…
+    </div>
+  ),
+});
 
+type Props = { events: ArtistEvent[]; artistName: string };
+
+type Loaded = { fileName: string; customers: Customer[]; geocode: GeocodeMap };
 type Stage =
   | { kind: "idle" }
   | { kind: "parsing"; fileName: string }
-  | {
-      kind: "ready";
-      fileName: string;
-      customerCount: number;
-      result: CustomerCrossover;
-    }
+  | { kind: "ready"; loaded: Loaded }
   | { kind: "error"; message: string };
 
 export function CustomerCrossoverPanel({ events, artistName }: Props) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [dragOver, setDragOver] = useState(false);
+  const [radiusMiles, setRadiusMiles] = useState(60);
   const inputId = `crossover-csv-${artistName.replace(/\W+/g, "-")}`;
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -37,15 +43,18 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
-      complete: (result) => {
+      complete: async (result) => {
         try {
-          const customers: Customer[] = parseCustomers(result.data);
-          const analysis = crossover(customers, events);
+          const customers = parseCustomers(result.data);
+          // Defer the 1MB lat/lng bundle until a CSV is actually dropped.
+          const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
           setStage({
             kind: "ready",
-            fileName: file.name,
-            customerCount: customers.length,
-            result: analysis,
+            loaded: {
+              fileName: file.name,
+              customers,
+              geocode: US_CITY_LATLNG as unknown as GeocodeMap,
+            },
           });
         } catch (err) {
           setStage({
@@ -66,7 +75,6 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
     if (file) handleFile(file);
   };
 
-  // No upcoming events → no point in customer crossover
   if (!events || events.length === 0) {
     return (
       <div className="serif-italic text-ink/55 text-sm">
@@ -127,10 +135,11 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
 
       {stage.kind === "ready" && (
         <CrossoverResult
-          fileName={stage.fileName}
-          customerCount={stage.customerCount}
-          result={stage.result}
+          loaded={stage.loaded}
+          events={events}
           artistName={artistName}
+          radiusMiles={radiusMiles}
+          setRadiusMiles={setRadiusMiles}
           onReset={() => setStage({ kind: "idle" })}
         />
       )}
@@ -139,44 +148,66 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
 }
 
 function CrossoverResult({
-  fileName,
-  customerCount,
-  result,
+  loaded,
+  events,
   artistName,
+  radiusMiles,
+  setRadiusMiles,
   onReset,
 }: {
-  fileName: string;
-  customerCount: number;
-  result: CustomerCrossover;
+  loaded: Loaded;
+  events: ArtistEvent[];
   artistName: string;
+  radiusMiles: number;
+  setRadiusMiles: (n: number) => void;
   onReset: () => void;
 }) {
-  // Sort tour stops by impact (most customers nearby first)
+  // The pure engine re-runs instantly as the slider moves — no re-parse.
+  const result: CustomerCrossover = useMemo(
+    () =>
+      crossover(loaded.customers, events, {
+        radiusMiles,
+        geocode: loaded.geocode,
+      }),
+    [loaded, events, radiusMiles],
+  );
+
+  // Existing stops, most-reached first. Prefer radius count; fall back to state.
   const sortedEvents = [...result.perEvent].sort(
-    (a, b) => b.sameStateCount - a.sameStateCount,
+    (a, b) =>
+      (b.withinRadiusCount || b.sameStateCount) -
+      (a.withinRadiusCount || a.sameStateCount),
   );
-  const totalNearbyAcrossTour = result.perEvent.reduce(
-    (sum, e) => sum + e.sameStateCount,
-    0,
-  );
+
+  // Group routing suggestions by the gap they fill (from→to + dates).
+  const gapGroups = new Map<string, typeof result.routingSuggestions>();
+  for (const s of result.routingSuggestions) {
+    const key = `${s.fromCity}|${s.fromDate}|${s.toCity}|${s.toDate}`;
+    const arr = gapGroups.get(key) ?? [];
+    arr.push(s);
+    gapGroups.set(key, arr);
+  }
+
+  const topGap = result.routingSuggestions[0];
+  const reachPctLabel = Math.round(result.reachPct * 100);
 
   return (
     <div>
-      <div className="mono text-ink/55 mb-3 flex flex-wrap gap-x-4 gap-y-1">
+      {/* Header */}
+      <div className="mono text-ink/55 mb-3 flex flex-wrap gap-x-4 gap-y-1 items-baseline">
         <span>
-          ✓ {customerCount.toLocaleString()} CUSTOMERS · {result.uniqueStates}{" "}
-          STATES
+          ✓ {result.totalCustomers.toLocaleString()} CUSTOMERS ·{" "}
+          {result.uniqueStates} STATES
           {result.droppedCount > 0 && (
             <span
               className="text-ink/40 ml-2"
-              title={`${result.droppedCount} customer rows excluded from matching: their "state" value was empty, "USA"/non-US, or otherwise unrecognized. Those rows were preserved in the file — just skipped for tour-stop overlap math.`}
+              title={`${result.droppedCount} rows excluded — state value empty, "USA"/non-US, or unrecognized. Preserved in the file, just skipped for matching.`}
             >
-              ({result.droppedCount.toLocaleString()} skipped — no recognizable
-              state)
+              ({result.droppedCount.toLocaleString()} skipped)
             </span>
           )}
         </span>
-        <span className="text-ink/40">{fileName}</span>
+        <span className="text-ink/40">{loaded.fileName}</span>
         <button
           onClick={onReset}
           className="mono text-ink/50 underline ml-auto hover:text-red"
@@ -185,16 +216,80 @@ function CrossoverResult({
         </button>
       </div>
 
+      {/* Reach headline */}
+      <div className="border-y border-ink/15 py-3 mb-4">
+        <div className="display text-2xl md:text-3xl leading-tight">
+          TOUR REACHES{" "}
+          <span className="text-red">
+            {result.reachedCustomers.toLocaleString()}
+          </span>{" "}
+          / {result.totalCustomers.toLocaleString()} CUSTOMERS ({reachPctLabel}
+          %)
+          <span className="text-ink/40 text-xl"> WITHIN {radiusMiles}MI</span>
+        </div>
+        {topGap && (
+          <div className="serif-italic text-ink/70 mt-1">
+            Biggest on-route gap:{" "}
+            <span className="not-italic font-medium">
+              {topGap.city}, {topGap.stateCode}
+            </span>{" "}
+            — {topGap.customers} customers in a {topGap.gapDays}-day window (+
+            {topGap.detourMiles}mi detour).
+          </div>
+        )}
+      </div>
+
+      {/* Mileage slider */}
+      <div className="flex items-center gap-4 mb-4">
+        <span className="mono text-ink/55 shrink-0">
+          RADIUS · {radiusMiles}MI
+        </span>
+        <input
+          type="range"
+          min={25}
+          max={250}
+          step={5}
+          value={radiusMiles}
+          onChange={(e) => setRadiusMiles(parseInt(e.target.value, 10))}
+          className="flex-1 accent-red"
+        />
+        <span className="mono text-ink/35 shrink-0 hidden sm:inline">
+          drag to widen reach + routing corridor
+        </span>
+      </div>
+
+      {/* Map */}
+      <div className="mb-5">
+        <TourMap
+          stops={result.mapData.stops}
+          customerPoints={result.mapData.customerPoints}
+          suggestions={result.mapData.suggestions}
+          radiusMiles={radiusMiles}
+        />
+        <div className="mono text-ink/35 text-xs mt-1 flex flex-wrap gap-x-4">
+          <span>
+            <span className="text-red">●</span> TOUR STOP
+          </span>
+          <span>
+            <span className="text-blue">●</span> SUGGESTED STOP
+          </span>
+          <span>🔥 CUSTOMER DENSITY</span>
+        </div>
+      </div>
+
       <div className="grid md:grid-cols-2 gap-x-10 gap-y-6">
+        {/* 01 — Existing stops */}
         <div>
           <div className="mono mb-3 pb-2 border-b border-ink/15">
-            01 — TOUR STOPS · CUSTOMER OVERLAP
+            01 — TOUR STOPS · CUSTOMER REACH
           </div>
-          {sortedEvents.length === 0 ? (
-            <div className="serif-italic text-ink/55">No events.</div>
-          ) : (
-            <div className="space-y-3">
-              {sortedEvents.map((e, i) => (
+          <div className="space-y-3">
+            {sortedEvents.map((e, i) => {
+              const useRadius = e.lat !== undefined && e.lng !== undefined;
+              const headline = useRadius
+                ? e.withinRadiusCount
+                : e.sameStateCount;
+              return (
                 <div key={i}>
                   <div className="flex items-baseline gap-3">
                     <span className="mono text-ink/55 w-20 shrink-0">
@@ -207,9 +302,11 @@ function CrossoverResult({
                       <div className="text-sm text-ink/60">{e.event.city}</div>
                     </div>
                     <div className="text-right">
-                      <div className="display text-2xl">{e.sameStateCount}</div>
+                      <div className="display text-2xl">{headline}</div>
                       <div className="mono text-ink/40">
-                        IN {e.stateCode ?? "?"}
+                        {useRadius
+                          ? `≤${radiusMiles}MI`
+                          : `IN ${e.stateCode ?? "?"}`}
                       </div>
                     </div>
                   </div>
@@ -229,39 +326,84 @@ function CrossoverResult({
                     </div>
                   )}
                 </div>
-              ))}
-              <div className="pt-3 border-t border-ink/10 mono text-ink/60">
-                TOTAL {artistName.toUpperCase()} CUSTOMERS ACROSS TOUR STATES:{" "}
-                <span className="text-ink display text-xl ml-2">
-                  {totalNearbyAcrossTour.toLocaleString()}
-                </span>
-              </div>
-            </div>
-          )}
+              );
+            })}
+          </div>
         </div>
 
+        {/* 02 — Routing opportunities */}
         <div>
           <div className="mono mb-3 pb-2 border-b border-ink/15">
-            02 — TOP CUSTOMER STATES
+            02 — 💡 ROUTING OPPORTUNITIES
           </div>
-          <div className="space-y-1.5">
-            {result.topStates.map((s, i) => (
-              <div key={s.stateCode} className="flex items-baseline gap-3">
-                <span className="mono text-ink/40 w-5">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="font-medium w-32">{s.stateName}</span>
-                <span className="text-ink/50 mono">{s.stateCode}</span>
-                <span className="display text-lg ml-auto">{s.count}</span>
-              </div>
-            ))}
+          {gapGroups.size === 0 ? (
+            <div className="serif-italic text-ink/55 text-sm">
+              No fillable gaps found — either no multi-day gaps between stops,
+              or no customer-dense cities sit on-route within {radiusMiles}mi.
+              Widen the radius to surface more.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {[...gapGroups.entries()].map(([key, sugs]) => {
+                const s0 = sugs[0];
+                return (
+                  <div key={key}>
+                    <div className="mono text-ink/50 text-xs mb-1">
+                      {s0.gapDays}-DAY GAP · {s0.fromCity} ({s0.fromDate}) →{" "}
+                      {s0.toCity} ({s0.toDate})
+                    </div>
+                    {sugs.map((s, i) => (
+                      <div
+                        key={i}
+                        className="flex items-baseline gap-3 ml-1 mb-1"
+                      >
+                        <span className="text-blue">→</span>
+                        <span className="font-medium flex-1">
+                          {s.city}, {s.stateCode}
+                        </span>
+                        <span className="display text-lg">{s.customers}</span>
+                        <span className="mono text-ink/40 text-xs w-28 text-right">
+                          +{s.detourMiles}mi · ~{s.suggestedDate.slice(5)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 03 — Untapped markets */}
+          <div className="mono mb-3 mt-6 pb-2 border-b border-ink/15">
+            03 — TOP UNTAPPED MARKETS · TOUR NEXT
           </div>
+          {result.untappedMarkets.length === 0 ? (
+            <div className="serif-italic text-ink/55 text-sm">
+              Every dense customer city is already within range of a stop.
+              Strong routing.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {result.untappedMarkets.map((m, i) => (
+                <div key={i} className="flex items-baseline gap-3">
+                  <span className="mono text-ink/40 w-5">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="font-medium flex-1">
+                    {m.city}, {m.stateCode}
+                  </span>
+                  <span className="display text-lg">{m.customers}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="mt-5 serif-italic text-ink/45 text-xs">
-        State-level match only. Geographic radius (e.g. &quot;within 90 miles of
-        Cohasset&quot;) is a future enhancement — needs geocoding.
+        Distances are straight-line (great-circle) from city centers — close
+        enough to rank routing detours. Customers without a recognizable US city
+        aren&apos;t mapped.
       </div>
     </div>
   );
