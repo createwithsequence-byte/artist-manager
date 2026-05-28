@@ -203,18 +203,33 @@ def _extract_concerts(goods: dict) -> list[dict]:
         date = (iso or "")[:10] if iso else None
         if not date or date < today:
             continue
+        # Spotify GraphQL's location shape on concerts is undocumented and
+        # field names vary. Try every observed variant before giving up.
+        # If you find a new variant in the wild, add it here — the unknown
+        # field becomes visible in the `_locDebug` echo (see below) which
+        # short-circuits a redeploy cycle when this happens again.
+        region = (
+            loc.get("region")
+            or loc.get("regionCode")
+            or loc.get("state")
+            or loc.get("administrativeArea")
+            or loc.get("subdivision")
+            or None
+        )
+        country = (
+            loc.get("country") or loc.get("countryCode") or None
+        )
         out.append({
             "date": date,
             "venue": loc.get("name") or "TBD",
             "city": loc.get("city") or "?",
-            # State/region code — crucial for the Customer Crossover panel to
-            # match tour stops against customer locations. Without this every
-            # Spotify-federated concert reads as "Spring Hill, ?" because the
-            # city alone doesn't disambiguate (Spring Hill exists in TN, FL,
-            # KS, etc.). Top-cities already pulls `region` from the same
-            # location shape — _extract_concerts was just missing it.
-            "region": loc.get("region"),
-            "country": loc.get("country"),
+            "region": region,
+            "country": country,
+            # Debug echo of the raw location keys for the FIRST concert only —
+            # so when a Spotify schema change re-breaks state-extraction in
+            # production, you can see immediately what shape they sent without
+            # another build cycle. Costs ~50 bytes of payload per response.
+            "_locDebug": list(loc.keys()) if len(out) == 0 else None,
             "festival": bool(d.get("festival")),
             "uri": d.get("uri"),
             "concertUrl": d.get("concertUrl") or d.get("url"),
