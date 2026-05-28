@@ -60,6 +60,22 @@ export default function Home() {
   // not artists scouted in previous runs that are already in `reports`.
   const reportsAtRunStartRef = useRef(0);
 
+  // Single-artist lookup mode — bypasses CSV upload entirely. When set,
+  // overrides the artists derivation so the existing scout flow processes
+  // exactly one synthetic "row". fileName stays empty so nothing persists
+  // to Turso/localStorage (ephemeral by design — for quick triage, not
+  // archival). Auto-triggers a scout once state settles.
+  const [singleLookupArtist, setSingleLookupArtist] =
+    useState<ArtistInput | null>(null);
+  const lookupFiredRef = useRef(false);
+
+  // Hide-stub filter — default ON. When 73% of rows are "AI synthesis
+  // unavailable" stubs (current state of an LLM-exhausted scout), they
+  // dominate the viewport with noise. Hiding them by default keeps the
+  // view to artists you've actually computed a signal for. The chip
+  // counter shows how many are hidden so it's never invisible work.
+  const [hideStubs, setHideStubs] = useState(true);
+
   // Persistence backend: 'unknown' on mount → 'turso' or 'local' after first probe.
   const [persistenceMode, setPersistenceMode] = useState<
     "unknown" | "turso" | "local"
@@ -239,6 +255,8 @@ export default function Home() {
 
   const nameCol = useMemo(() => (rows ? detectNameColumn(rows) : null), [rows]);
   const artists = useMemo<ArtistInput[]>(() => {
+    // Single-artist lookup overrides CSV-derived artists entirely.
+    if (singleLookupArtist) return [singleLookupArtist];
     if (!rows || !nameCol) return [];
     return rows
       .map((r) => ({
@@ -248,7 +266,7 @@ export default function Home() {
         tiktok: r["TikTok"] || r["tiktok"],
       }))
       .filter((a) => a.name);
-  }, [rows, nameCol]);
+  }, [rows, nameCol, singleLookupArtist]);
 
   // Backfill: cached reports from older runs don't have csvSpotifyUrl.
   // Cross-reference with the current artists list (from CSV) to populate it,
@@ -513,6 +531,39 @@ export default function Home() {
     diveAbortRef.current?.abort();
   };
 
+  // Auto-fire scout when single-artist lookup state lands. We can't call
+  // runOnce inline from the form handler because `artists` is derived via
+  // useMemo and only updates AFTER React commits the state change. The
+  // effect waits for the derived `artists` to reach exactly 1 (our synthetic
+  // lookup row), then triggers runOnce once. The lookupFiredRef guards
+  // against re-firing across renders.
+  useEffect(() => {
+    if (
+      singleLookupArtist &&
+      artists.length === 1 &&
+      state === "idle" &&
+      reports.length === 0 &&
+      !lookupFiredRef.current
+    ) {
+      lookupFiredRef.current = true;
+      runOnce(false);
+    }
+    if (!singleLookupArtist) {
+      lookupFiredRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [singleLookupArtist, artists.length, state, reports.length]);
+
+  const exitSingleLookup = () => {
+    setSingleLookupArtist(null);
+    lookupFiredRef.current = false;
+    setReports([]);
+    setErrors([]);
+    setActiveArtist("");
+    setActiveStep("");
+    setState("idle");
+  };
+
   const resetAll = () => {
     stopLoopRef.current = true;
     if (cacheKey) {
@@ -547,6 +598,14 @@ export default function Home() {
     resetAll();
   };
 
+  // A "stub" is a report whose synth fell back to the dummy summary because
+  // every LLM provider was exhausted at synthesis time. They still hold raw
+  // data (Spotify, events, releases) but have no signals or written summary,
+  // so they're noise in the main list until re-classified via /api/resynth.
+  const isStub = (r: ArtistReport) =>
+    typeof r.summary === "string" &&
+    r.summary.includes("AI synthesis unavailable");
+
   const filteredReports = useMemo(() => {
     let result = reports;
     if (filter !== "all") {
@@ -556,8 +615,25 @@ export default function Home() {
       const q = searchQuery.trim().toLowerCase();
       result = result.filter((r) => r.name.toLowerCase().includes(q));
     }
+    // Hide-stubs filter (default ON) — applied AFTER signal/search filters so
+    // the user can still toggle a specific signal chip and see all matching
+    // artists in that signal (signal-having artists are never stubs).
+    if (hideStubs && filter === "all") {
+      result = result.filter((r) => !isStub(r));
+    }
+    // Classified-first sort: artists with signals lead, stubs trail. Within
+    // each group preserve insertion order so the user's mental map of "row
+    // 037 is X" stays stable when toggling the hide-stubs filter.
+    result = [...result].sort((a, b) => {
+      const aStub = isStub(a);
+      const bStub = isStub(b);
+      if (aStub === bStub) return 0;
+      return aStub ? 1 : -1;
+    });
     return result;
-  }, [reports, filter, searchQuery]);
+  }, [reports, filter, searchQuery, hideStubs]);
+
+  const stubCount = useMemo(() => reports.filter(isStub).length, [reports]);
 
   const scoutedNames = useMemo(
     () => new Set(reports.map((r) => r.name.toLowerCase())),
@@ -610,7 +686,32 @@ export default function Home() {
         }}
       />
 
-      {!rows && !hasResults && (
+      {/* Single-lookup mode banner — replaces the cream-on-cream toolbar
+          context with a clear scope indicator so the user knows they're
+          NOT looking at a full roster. Click the × to exit and return to
+          the empty state. Only shows while singleLookupArtist is set. */}
+      {singleLookupArtist && (
+        <div className="bg-ink text-cream px-5 py-2 flex items-center gap-3">
+          <span className="mono text-cream/60">LOOKING UP</span>
+          <span className="font-medium truncate">
+            {singleLookupArtist.name}
+          </span>
+          {singleLookupArtist.spotifyUrl && (
+            <span className="mono text-cream/45 truncate hidden md:inline">
+              · {singleLookupArtist.spotifyUrl}
+            </span>
+          )}
+          <button
+            onClick={exitSingleLookup}
+            className="mono ml-auto text-cream/60 hover:text-red transition-colors"
+            title="Exit single-artist mode and return to upload"
+          >
+            ✕ EXIT
+          </button>
+        </div>
+      )}
+
+      {!rows && !hasResults && !singleLookupArtist && (
         <section className="px-5 py-12 md:py-20">
           <div className="max-w-5xl">
             <h1 className="display text-6xl md:text-8xl lg:text-9xl leading-[0.85] mb-6">
@@ -645,6 +746,59 @@ export default function Home() {
                 COLUMN
               </div>
             </label>
+
+            {/* Single-artist quick lookup — bypasses CSV upload for one-off
+                triage. Spotify URL is optional but recommended: when present
+                the orchestrator anchors identity to it across MB + sidecar
+                lookups, killing the "Tori → Tori Kelly" class of fuzzy-match
+                identity poisoning. Submission auto-fires a scout via the
+                effect above; result renders as a single expanded row with
+                the Customer Crossover panel inline for geo-overlap analysis. */}
+            <div className="mt-10">
+              <div className="mono text-ink/50 mb-3">
+                ↳ OR LOOK UP A SINGLE ARTIST
+              </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const fd = new FormData(e.currentTarget);
+                  const name = String(fd.get("name") || "").trim();
+                  if (!name) return;
+                  const spotifyUrlRaw = String(
+                    fd.get("spotifyUrl") || "",
+                  ).trim();
+                  setSingleLookupArtist({
+                    name,
+                    spotifyUrl: spotifyUrlRaw || undefined,
+                  });
+                }}
+                className="flex flex-col sm:flex-row gap-2"
+              >
+                <input
+                  name="name"
+                  type="text"
+                  required
+                  placeholder="Artist name"
+                  className="flex-1 border border-ink/30 bg-transparent px-3 h-11 focus:outline-none focus:border-ink placeholder:text-ink/35"
+                />
+                <input
+                  name="spotifyUrl"
+                  type="text"
+                  placeholder="Spotify URL (optional — anchors identity)"
+                  className="flex-[1.5] border border-ink/30 bg-transparent px-3 h-11 focus:outline-none focus:border-ink placeholder:text-ink/35 mono text-sm"
+                />
+                <button
+                  type="submit"
+                  className="mono h-11 px-5 bg-ink text-cream hover:bg-red transition-colors shrink-0"
+                >
+                  LOOK UP →
+                </button>
+              </form>
+              <div className="serif-italic text-ink/55 text-sm mt-2">
+                One-off triage. Result is ephemeral — not saved to Turso. Drop a
+                customer CSV inside the expanded row for tour-overlap analysis.
+              </div>
+            </div>
 
             {recentCsvs.length > 0 && (
               <div className="mt-10">
@@ -810,6 +964,30 @@ export default function Home() {
                     </button>
                   );
                 })}
+                {/* Hide-stubs toggle — only surfaces when the current view has
+                    at least one stub to hide. Default ON because in current
+                    LLM-exhaustion conditions ~73% of fresh-scout reports stub,
+                    drowning the classified rows. Toggle is mono caps to match
+                    the filter-chip register and stays visually subordinate. */}
+                {filter === "all" && stubCount > 0 && (
+                  <button
+                    onClick={() => setHideStubs((s) => !s)}
+                    title={
+                      hideStubs
+                        ? `Showing classified only. ${stubCount} stubs hidden — run /api/resynth to fill them in.`
+                        : `Showing all ${reports.length} reports, including ${stubCount} stubs.`
+                    }
+                    className={`mono px-2.5 h-7 border transition-colors ${
+                      hideStubs
+                        ? "border-ink/25 hover:border-ink/60 text-ink/55"
+                        : "bg-ink/[0.06] border-ink/40 text-ink"
+                    }`}
+                  >
+                    {hideStubs
+                      ? `↳ ${stubCount} STUBS HIDDEN`
+                      : `◉ SHOWING ${stubCount} STUBS`}
+                  </button>
+                )}
                 {(() => {
                   if (diveBatch.running) return null;
                   const needsDive = filteredReports.filter((r) => !r.deepDive);

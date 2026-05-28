@@ -1,5 +1,6 @@
 import { GoogleGenAI, type GenerateContentResponse } from "@google/genai";
 import Groq from "groq-sdk";
+import { loadModelCooldowns, recordModelCooldown } from "./db";
 
 let _gemini: GoogleGenAI | null = null;
 let _groq: Groq | null = null;
@@ -21,18 +22,66 @@ function groqClient(): Groq | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Within a single warm-lambda lifetime, remember which models exhausted their
-// daily quota so we don't burn 3-5s per subsequent call retrying them. Reset
-// after MIDNIGHT_RESET_HOURS (Gemini's free-tier quotas roll daily near midnight
-// Pacific). Lambda recycles or cold-starts reset this implicitly.
+// In-memory cooldown cache. Each Vercel lambda lazily hydrates this from the
+// shared `model_cooldown` table in Turso the first time generateWithRetry is
+// called within its warm lifetime. Subsequent calls hit the cache directly
+// (zero Turso latency on the hot path). When THIS lambda discovers a model
+// exhaustion, it writes back to Turso so the next cold-starting lambda
+// inherits the state instead of re-discovering it the hard way.
 const _modelExhaustedAt = new Map<string, number>();
 const MODEL_COOLDOWN_MS = 60 * 60 * 1000; // 1h — conservative; daily quota typically resets at midnight Pacific
+let _cooldownsHydrated = false;
+let _cooldownHydrationPromise: Promise<void> | null = null;
+
+async function ensureCooldownsHydrated(): Promise<void> {
+  if (_cooldownsHydrated) return;
+  // Concurrent first-callers share a single hydration round-trip instead of
+  // each issuing their own Turso SELECT. Pattern is "single-flight": the
+  // first caller starts the promise, everyone else awaits the same one.
+  if (!_cooldownHydrationPromise) {
+    _cooldownHydrationPromise = (async () => {
+      try {
+        const rows = await loadModelCooldowns();
+        for (const r of rows) {
+          _modelExhaustedAt.set(r.model, r.exhausted_at_ms);
+        }
+        if (rows.length > 0) {
+          console.warn(
+            `[GEMINI] hydrated ${rows.length} cooldowns from Turso: ${rows.map((r) => r.model).join(", ")}`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "[GEMINI] cooldown hydration failed (continuing in-memory only):",
+          err instanceof Error ? err.message : String(err),
+        );
+      } finally {
+        _cooldownsHydrated = true;
+      }
+    })();
+  }
+  await _cooldownHydrationPromise;
+}
+
 function isModelExhausted(model: string): boolean {
   const t = _modelExhaustedAt.get(model);
   return t !== undefined && Date.now() - t < MODEL_COOLDOWN_MS;
 }
+
 function markModelExhausted(model: string): void {
-  _modelExhaustedAt.set(model, Date.now());
+  const now = Date.now();
+  _modelExhaustedAt.set(model, now);
+  // Fire-and-forget Turso write so peer lambdas (warm and not-yet-spawned)
+  // see this cooldown without having to re-discover it themselves. We do
+  // NOT await — DB latency shouldn't slow the synth path, and the worst
+  // case if this write fails is that other lambdas re-probe Gemini once
+  // before discovering the wall, same as today.
+  recordModelCooldown(model, now).catch((err) =>
+    console.warn(
+      `[GEMINI] recordCooldown(${model}) failed:`,
+      err instanceof Error ? err.message : String(err),
+    ),
+  );
 }
 
 // Each Gemini model has its OWN daily quota — exhausting one doesn't block the
@@ -342,13 +391,18 @@ export async function generateWithRetry(
   const retries = opts.retries ?? 2;
   const baseDelayMs = opts.baseDelayMs ?? 2000;
   const requestedModel = args.model;
+  // Hydrate cooldown state from Turso once per lambda lifetime. Subsequent
+  // calls within the same lambda hit the in-memory map directly. Without
+  // this, every fresh lambda would burn ~3-5s on the model loop discovering
+  // exhaustion the same upstream-talking way.
+  await ensureCooldownsHydrated();
   const fullChain = [
     requestedModel,
     ...GEMINI_CHAIN.filter((m) => m !== requestedModel),
   ];
-  // Skip models we've already learned are exhausted in this lambda's lifetime.
-  // Big speedup when a batch (resynth, scout) processes many artists in a row:
-  // first artist discovers quota state, the rest go directly to Groq fallback.
+  // Skip models we've already learned are exhausted — either from this
+  // lambda's prior calls OR from peer lambdas via the shared Turso cooldown
+  // table. Big speedup on batches (resynth, scout) processing many artists.
   const modelsToTry = fullChain.filter((m) => !isModelExhausted(m));
   let lastErr: unknown = null;
 

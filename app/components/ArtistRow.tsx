@@ -141,7 +141,9 @@ export function ArtistRow({
             <>
               <div>{report.spotify.monthlyListeners.toLocaleString()}</div>
               <div className="text-ink/40">MONTHLY LISTENERS</div>
-              <div className="text-ink/30 text-[0.6rem]">UNIQUE · 28D</div>
+              <div className="text-ink/30 text-[0.6rem]">
+                UNIQUE · 28D · {tierOf(report.spotify.monthlyListeners)}
+              </div>
             </>
           ) : typeof report.followers === "number" ? (
             <>
@@ -564,6 +566,24 @@ function formatPlaycount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+/**
+ * Categorize an artist by Spotify monthly listener count. Surfaced as a tiny
+ * trailing label on the listener block so 422k vs 4.2M reads as a category
+ * judgment ("MID" vs "TOP TIER") at-a-glance, not just a raw integer.
+ *
+ * Brackets are tuned for the indie/mid-tier roster Songfinch typically scouts
+ * — emerging starts at zero, mid sits at the 50k–500k inflection where most
+ * "we should reach out" candidates land, top tier is reserved for genuinely
+ * stadium-scale artists where Songfinch placement economics shift.
+ */
+function tierOf(monthlyListeners: number): string {
+  if (monthlyListeners < 5_000) return "EMERGING";
+  if (monthlyListeners < 50_000) return "DEVELOPING";
+  if (monthlyListeners < 500_000) return "MID";
+  if (monthlyListeners < 5_000_000) return "MAJOR";
+  return "TOP TIER";
 }
 
 function formatLocation(loc?: {
