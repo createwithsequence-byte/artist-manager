@@ -1,4 +1,5 @@
 import type { Event as ArtistEvent } from "./types";
+import { US_CITY_TO_STATE } from "./usCityToState";
 
 // State name → 2-letter postal abbreviation. Used to normalize input data so
 // "Massachusetts" and "MA" both match the same tour stops.
@@ -176,12 +177,15 @@ export function crossover(
 
   // Per-event analysis
   const perEvent = events.map((event) => {
-    // Prefer explicit state when the orchestrator forwarded it (Ticketmaster
-    // and Spotify-federated paths both supply state codes natively, post
-    // sidecar v1.1 + ticketmaster.ts state-field-emit fixes). Fall back to
-    // regex-extracting from the city string for any legacy event payload
-    // (older cached reports, edge cases) where city is "Cohasset, MA" but
-    // the discrete state field is missing.
+    // Three-tier state extraction, in order of confidence:
+    //   1. event.state — explicit field from Ticketmaster + (future-Spotify)
+    //   2. Regex-extract from city — works for "Cohasset, MA" composite strings
+    //   3. US_CITY_TO_STATE bundled lookup — covers Spotify-federated concerts
+    //      whose city field is bare ("Spring Hill", "Nashville"). 14,722 cities
+    //      covered including hand-resolved high-volume touring markets. Cities
+    //      that are genuinely ambiguous (Franklin, Madison without venue
+    //      disambiguation) intentionally don't resolve here — they stay
+    //      "0 IN ?" rather than guess wrong.
     const cityField = event.city ?? "";
     let stateCode: string | null = event.state
       ? normalizeState(event.state)
@@ -195,6 +199,14 @@ export function crossover(
           ? stateMatch[1].toUpperCase()
           : normalizeState(stateMatch[2]);
       }
+    }
+    if (!stateCode) {
+      // Lookup bare city name. The split-on-comma + trim handles edge cases
+      // where the city accidentally has a trailing string we don't recognize
+      // (e.g. "Nashville " or "Nashville, ").
+      const bare = cityField.split(",")[0].trim().toLowerCase();
+      const lookedUp = US_CITY_TO_STATE[bare];
+      if (lookedUp) stateCode = lookedUp;
     }
     // Pull just the city name part for city-match attempts
     const cityPart = cityField.split(",")[0].trim().toLowerCase();

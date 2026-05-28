@@ -225,11 +225,6 @@ def _extract_concerts(goods: dict) -> list[dict]:
             "city": loc.get("city") or "?",
             "region": region,
             "country": country,
-            # Debug echo of the raw location keys for the FIRST concert only —
-            # so when a Spotify schema change re-breaks state-extraction in
-            # production, you can see immediately what shape they sent without
-            # another build cycle. Costs ~50 bytes of payload per response.
-            "_locDebug": list(loc.keys()) if len(out) == 0 else None,
             "festival": bool(d.get("festival")),
             "uri": d.get("uri"),
             "concertUrl": d.get("concertUrl") or d.get("url"),
