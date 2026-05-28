@@ -88,6 +88,8 @@ export type RoutingSuggestion = {
   customers: number;
   /** Extra miles vs. driving the two existing stops back-to-back. */
   detourMiles: number;
+  /** Straight-line miles of the leg this fills (its A→B distance). */
+  segmentMiles: number;
   gapDays: number;
   fromCity: string;
   fromDate: string;
@@ -97,6 +99,26 @@ export type RoutingSuggestion = {
   suggestedDate: string;
   lat: number;
   lng: number;
+};
+
+/** One leg of the route: the connector between two consecutive dated stops.
+ *  First-class so the UI can render the journey chronologically with each
+ *  gap (idle days) + drive (miles) as a clickable object between shows. */
+export type Leg = {
+  fromCity: string;
+  fromDate: string;
+  toCity: string;
+  toDate: string;
+  /** Straight-line miles between the two stops (great-circle). */
+  segmentMiles: number;
+  /** Idle days between the two dates. */
+  gapDays: number;
+  fromLat: number;
+  fromLng: number;
+  toLat: number;
+  toLng: number;
+  /** Fan-dense cities on this corridor worth slotting into the gap. */
+  suggestions: RoutingSuggestion[];
 };
 
 export type CustomerCrossover = {
@@ -130,6 +152,13 @@ export type CustomerCrossover = {
   topStates: Array<{ stateCode: string; stateName: string; count: number }>;
   /** Suggested net-new stops to add between existing dates. */
   routingSuggestions: RoutingSuggestion[];
+  /** The route as ordered legs between consecutive dated stops (chronological).
+   *  Drives the timeline "routing sheet" view. */
+  legs: Leg[];
+  /** Sum of all leg straight-line miles. */
+  totalRouteMiles: number;
+  /** Largest idle gap (days) anywhere on the route. */
+  longestGapDays: number;
   /** Customer cities NOT reached by the current tour, ranked — "tour next." */
   untappedMarkets: Array<{
     city: string;
@@ -353,56 +382,82 @@ export function crossover(
   const maxDetour = radiusMiles * 2; // city within ~radius of the A→B line
   const routingSuggestions: RoutingSuggestion[] = [];
   const suggestedCityKeys = new Set<string>();
+  const legs: Leg[] = [];
 
   for (let i = 0; i < datedStops.length - 1; i++) {
     const A = datedStops[i];
     const B = datedStops[i + 1];
     const gap = dayGap(A.event.date, B.event.date);
-    if (gap < MIN_GAP_DAYS) continue;
     const directMiles = haversineMiles(A.coords!, B.coords!);
 
-    const candidates = cityAggs
-      .map((agg) => {
-        const detour =
-          haversineMiles(A.coords!, agg.coords) +
-          haversineMiles(agg.coords, B.coords!) -
-          directMiles;
-        return { agg, detour };
-      })
-      .filter(
-        ({ agg, detour }) =>
-          detour <= maxDetour &&
-          agg.count >= MIN_SUGGESTION_CUSTOMERS &&
-          // Skip cities already served by an existing stop this gap touches.
-          haversineMiles(A.coords!, agg.coords) > radiusMiles &&
-          haversineMiles(B.coords!, agg.coords) > radiusMiles,
-      )
-      // Rank: most customers per unit of detour (the artist-beneficial stop).
-      .sort(
-        (x, y) => y.agg.count / (1 + y.detour) - x.agg.count / (1 + x.detour),
-      )
-      .slice(0, MAX_SUGGESTIONS_PER_GAP);
+    // Only search for fill candidates when the gap is bookable. Short legs
+    // still get a Leg object (so the spine renders the whole journey) — they
+    // just carry no suggestions.
+    const legSuggestions: RoutingSuggestion[] = [];
+    if (gap >= MIN_GAP_DAYS) {
+      const candidates = cityAggs
+        .map((agg) => {
+          const detour =
+            haversineMiles(A.coords!, agg.coords) +
+            haversineMiles(agg.coords, B.coords!) -
+            directMiles;
+          return { agg, detour };
+        })
+        .filter(
+          ({ agg, detour }) =>
+            detour <= maxDetour &&
+            agg.count >= MIN_SUGGESTION_CUSTOMERS &&
+            // Skip cities already served by an existing stop this gap touches.
+            haversineMiles(A.coords!, agg.coords) > radiusMiles &&
+            haversineMiles(B.coords!, agg.coords) > radiusMiles,
+        )
+        // Rank: most customers per unit of detour (artist-beneficial stop).
+        .sort(
+          (x, y) => y.agg.count / (1 + y.detour) - x.agg.count / (1 + x.detour),
+        )
+        .slice(0, MAX_SUGGESTIONS_PER_GAP);
 
-    for (const { agg, detour } of candidates) {
-      const key = `${agg.city.toLowerCase()}|${agg.stateCode}`;
-      if (suggestedCityKeys.has(key)) continue; // dedupe across gaps
-      suggestedCityKeys.add(key);
-      routingSuggestions.push({
-        city: agg.city,
-        stateCode: agg.stateCode,
-        customers: agg.count,
-        detourMiles: Math.round(detour),
-        gapDays: gap,
-        fromCity: A.event.city ?? "?",
-        fromDate: A.event.date,
-        toCity: B.event.city ?? "?",
-        toDate: B.event.date,
-        suggestedDate: midDate(A.event.date, B.event.date),
-        lat: agg.coords[0],
-        lng: agg.coords[1],
-      });
+      for (const { agg, detour } of candidates) {
+        const key = `${agg.city.toLowerCase()}|${agg.stateCode}`;
+        if (suggestedCityKeys.has(key)) continue; // dedupe across gaps
+        suggestedCityKeys.add(key);
+        const sug: RoutingSuggestion = {
+          city: agg.city,
+          stateCode: agg.stateCode,
+          customers: agg.count,
+          detourMiles: Math.round(detour),
+          segmentMiles: Math.round(directMiles),
+          gapDays: gap,
+          fromCity: A.event.city ?? "?",
+          fromDate: A.event.date,
+          toCity: B.event.city ?? "?",
+          toDate: B.event.date,
+          suggestedDate: midDate(A.event.date, B.event.date),
+          lat: agg.coords[0],
+          lng: agg.coords[1],
+        };
+        legSuggestions.push(sug);
+        routingSuggestions.push(sug);
+      }
     }
+
+    legs.push({
+      fromCity: A.event.city ?? "?",
+      fromDate: A.event.date,
+      toCity: B.event.city ?? "?",
+      toDate: B.event.date,
+      segmentMiles: Math.round(directMiles),
+      gapDays: gap,
+      fromLat: A.coords![0],
+      fromLng: A.coords![1],
+      toLat: B.coords![0],
+      toLng: B.coords![1],
+      suggestions: legSuggestions,
+    });
   }
+
+  const totalRouteMiles = legs.reduce((s, l) => s + l.segmentMiles, 0);
+  const longestGapDays = legs.reduce((m, l) => Math.max(m, l.gapDays), 0);
 
   // ---- Untapped markets: dense customer cities NOT within radius of a stop --
   const stopCoords = eventsGeo
@@ -434,6 +489,9 @@ export function crossover(
     perEvent,
     topStates,
     routingSuggestions,
+    legs,
+    totalRouteMiles,
+    longestGapDays,
     untappedMarkets,
     mapData: {
       customerPoints: cityAggs.map((a) => ({
@@ -441,15 +499,15 @@ export function crossover(
         lng: a.coords[1],
         weight: a.count,
       })),
-      stops: eventsGeo
-        .filter((e) => e.coords)
-        .map((e) => ({
-          lat: e.coords![0],
-          lng: e.coords![1],
-          city: e.event.city ?? "?",
-          date: e.event.date,
-          venue: e.event.venue ?? "Venue TBD",
-        })),
+      // Date-ordered (datedStops is already sorted) so the map's route line
+      // + numbered pins read as a chronological journey, matching the spine.
+      stops: datedStops.map((e) => ({
+        lat: e.coords![0],
+        lng: e.coords![1],
+        city: e.event.city ?? "?",
+        date: e.event.date,
+        venue: e.event.venue ?? "Venue TBD",
+      })),
       suggestions: routingSuggestions.map((s) => ({
         lat: s.lat,
         lng: s.lng,

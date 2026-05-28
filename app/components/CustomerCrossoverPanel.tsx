@@ -9,14 +9,15 @@ import {
   type Customer,
   type CustomerCrossover,
   type GeocodeMap,
+  type Leg,
+  type RoutingSuggestion,
 } from "@/lib/customerCrossover";
 import type { Event as ArtistEvent } from "@/lib/types";
 
-// Leaflet touches `window`, so the map can't server-render. Lazy + ssr:false.
 const TourMap = dynamic(() => import("./TourMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-[360px] md:h-[440px] border border-ink/15 flex items-center justify-center mono text-ink/40">
+    <div className="w-full h-[380px] md:h-[460px] border border-ink/15 flex items-center justify-center mono text-ink/40">
       LOADING MAP…
     </div>
   ),
@@ -46,7 +47,6 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
       complete: async (result) => {
         try {
           const customers = parseCustomers(result.data);
-          // Defer the 1MB lat/lng bundle until a CSV is actually dropped.
           const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
           setStage({
             kind: "ready",
@@ -78,8 +78,8 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
   if (!events || events.length === 0) {
     return (
       <div className="serif-italic text-ink/55 text-sm">
-        No upcoming events for {artistName}. Customer crossover needs a tour
-        date to intersect with — re-scout when {artistName} announces something.
+        No upcoming events for {artistName}. Routing needs tour dates to plot —
+        re-scout when {artistName} announces something.
       </div>
     );
   }
@@ -102,7 +102,7 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
                 : "border-ink/25 hover:border-ink/60"
             }`}
           >
-            <div className="mono mb-1">UPLOAD CUSTOMER CSV</div>
+            <div className="mono mb-1">UPLOAD CUSTOMER CSV → ROUTING SHEET</div>
             <div className="serif-italic text-ink/65 text-sm">
               Expected columns: <span className="mono">city, state</span> (plus
               anything else). Stays in browser — never uploaded.
@@ -134,7 +134,7 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
       )}
 
       {stage.kind === "ready" && (
-        <CrossoverResult
+        <RoutingSheet
           loaded={stage.loaded}
           events={events}
           artistName={artistName}
@@ -147,7 +147,39 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
   );
 }
 
-function CrossoverResult({
+// ── leg severity grammar ──────────────────────────────────────────────────
+function legDisplay(leg: Leg) {
+  const dark = leg.gapDays >= 3;
+  const milesPerDay = leg.segmentMiles / Math.max(leg.gapDays, 1);
+  const fly = leg.segmentMiles > 600 && leg.gapDays <= 1;
+  const driveHard = !fly && milesPerDay > 500;
+  const verdict = fly
+    ? "✈ FLY"
+    : driveHard
+      ? "DRIVE HARD"
+      : dark
+        ? "DARK"
+        : "DRIVE OK";
+  const slack = leg.gapDays < 7 ? 1 : leg.gapDays <= 21 ? 2 : 3;
+  const color = dark ? "text-red" : fly ? "text-blue" : "text-ink/45";
+  const railColor = dark ? "bg-red" : "bg-ink/20";
+  const railWidth = dark ? "w-[3px]" : "w-px";
+  return { dark, fly, verdict, slack, color, railColor, railWidth };
+}
+
+function fmtDay(date: string): string {
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return date;
+  return d
+    .toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    })
+    .toUpperCase();
+}
+
+function RoutingSheet({
   loaded,
   events,
   artistName,
@@ -162,50 +194,92 @@ function CrossoverResult({
   setRadiusMiles: (n: number) => void;
   onReset: () => void;
 }) {
-  // The pure engine re-runs instantly as the slider moves — no re-parse.
+  const [selectedLeg, setSelectedLeg] = useState<number | null>(null);
+  const [provisional, setProvisional] = useState<ArtistEvent[]>([]);
+  const [planOpen, setPlanOpen] = useState(false);
+
+  // Provisional what-if stops are appended to the event list; crossover
+  // re-geocodes + re-sorts by date, so they slot into the spine + redraw the
+  // route automatically. Keys flag them for distinct styling.
+  const provisionalKeys = useMemo(
+    () => new Set(provisional.map((p) => `${p.date}|${p.city}`)),
+    [provisional],
+  );
+  const allEvents = useMemo(
+    () => [...events, ...provisional],
+    [events, provisional],
+  );
+
   const result: CustomerCrossover = useMemo(
     () =>
-      crossover(loaded.customers, events, {
+      crossover(loaded.customers, allEvents, {
         radiusMiles,
         geocode: loaded.geocode,
       }),
-    [loaded, events, radiusMiles],
+    [loaded, allEvents, radiusMiles],
   );
 
-  // Existing stops, most-reached first. Prefer radius count; fall back to state.
-  const sortedEvents = [...result.perEvent].sort(
-    (a, b) =>
-      (b.withinRadiusCount || b.sameStateCount) -
-      (a.withinRadiusCount || a.sameStateCount),
+  // Build the chronological spine: shows sorted by date, with the matching
+  // Leg connector slotted between consecutive shows.
+  const shows = useMemo(
+    () =>
+      [...result.perEvent].sort((a, b) =>
+        a.event.date < b.event.date ? -1 : a.event.date > b.event.date ? 1 : 0,
+      ),
+    [result.perEvent],
   );
+  const legByPair = useMemo(() => {
+    const m = new Map<string, { leg: Leg; index: number }>();
+    result.legs.forEach((leg, index) => {
+      m.set(`${leg.fromDate}|${leg.fromCity}|${leg.toDate}|${leg.toCity}`, {
+        leg,
+        index,
+      });
+    });
+    return m;
+  }, [result.legs]);
 
-  // Group routing suggestions by the gap they fill (from→to + dates).
-  const gapGroups = new Map<string, typeof result.routingSuggestions>();
-  for (const s of result.routingSuggestions) {
-    const key = `${s.fromCity}|${s.fromDate}|${s.toCity}|${s.toDate}`;
-    const arr = gapGroups.get(key) ?? [];
-    arr.push(s);
-    gapGroups.set(key, arr);
-  }
+  const acceptSuggestion = (s: RoutingSuggestion) => {
+    const key = `${s.suggestedDate}|${s.city}`;
+    if (provisionalKeys.has(key)) return;
+    setProvisional((prev) => [
+      ...prev,
+      {
+        date: s.suggestedDate,
+        city: s.city,
+        state: s.stateCode,
+        venue: "PROVISIONAL",
+      } as ArtistEvent,
+    ]);
+  };
+  const removeProvisional = (date: string, city: string) =>
+    setProvisional((prev) =>
+      prev.filter((p) => !(p.date === date && p.city === city)),
+    );
 
-  const topGap = result.routingSuggestions[0];
-  const reachPctLabel = Math.round(result.reachPct * 100);
+  const coverageBlocks = Math.round(result.reachPct * 5);
+  const dateRange =
+    shows.length > 0
+      ? `${fmtDay(shows[0].event.date)} → ${fmtDay(shows[shows.length - 1].event.date)}`
+      : "";
+
+  // Map shows the selected leg's candidates when a leg is open, else all.
+  const mapSuggestions =
+    selectedLeg !== null && result.legs[selectedLeg]
+      ? result.legs[selectedLeg].suggestions.map((s) => ({
+          lat: s.lat,
+          lng: s.lng,
+          city: s.city,
+          customers: s.customers,
+        }))
+      : result.mapData.suggestions;
 
   return (
     <div>
       {/* Header */}
-      <div className="mono text-ink/55 mb-3 flex flex-wrap gap-x-4 gap-y-1 items-baseline">
-        <span>
-          ✓ {result.totalCustomers.toLocaleString()} CUSTOMERS ·{" "}
-          {result.uniqueStates} STATES
-          {result.droppedCount > 0 && (
-            <span
-              className="text-ink/40 ml-2"
-              title={`${result.droppedCount} rows excluded — state value empty, "USA"/non-US, or unrecognized. Preserved in the file, just skipped for matching.`}
-            >
-              ({result.droppedCount.toLocaleString()} skipped)
-            </span>
-          )}
+      <div className="mono text-ink/55 mb-2 flex flex-wrap gap-x-4 gap-y-1 items-baseline">
+        <span className="display text-lg text-ink">
+          {artistName.toUpperCase()} — ROUTING SHEET
         </span>
         <span className="text-ink/40">{loaded.fileName}</span>
         <button
@@ -216,31 +290,112 @@ function CrossoverResult({
         </button>
       </div>
 
-      {/* Reach headline */}
-      <div className="border-y border-ink/15 py-3 mb-4">
-        <div className="display text-2xl md:text-3xl leading-tight">
-          TOUR REACHES{" "}
-          <span className="text-red">
-            {result.reachedCustomers.toLocaleString()}
-          </span>{" "}
-          / {result.totalCustomers.toLocaleString()} CUSTOMERS ({reachPctLabel}
-          %)
-          <span className="text-ink/40 text-xl"> WITHIN {radiusMiles}MI</span>
-        </div>
-        {topGap && (
-          <div className="serif-italic text-ink/70 mt-1">
-            Biggest on-route gap:{" "}
-            <span className="not-italic font-medium">
-              {topGap.city}, {topGap.stateCode}
-            </span>{" "}
-            — {topGap.customers} customers in a {topGap.gapDays}-day window (+
-            {topGap.detourMiles}mi detour).
-          </div>
-        )}
+      {/* Route strip — orientation, not verdict */}
+      <div className="mono text-ink/70 border-y border-ink/15 py-2 mb-4 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <span>{shows.length} DATES</span>
+        <span className="text-ink/40">·</span>
+        <span>{dateRange}</span>
+        <span className="text-ink/40">·</span>
+        <span>{result.totalRouteMiles.toLocaleString()} RTE MI</span>
+        <span className="text-ink/40">·</span>
+        <span>LONGEST GAP {result.longestGapDays}D</span>
+        <span className="text-ink/40">·</span>
+        <span className="flex items-center gap-1">
+          FAN COVERAGE
+          <span className="tracking-tight">
+            {"▓".repeat(coverageBlocks)}
+            <span className="text-ink/25">
+              {"░".repeat(5 - coverageBlocks)}
+            </span>
+          </span>
+          {Math.round(result.reachPct * 100)}%
+          {result.reachPct < 0.15 && <span className="text-red ml-1">⚑</span>}
+        </span>
       </div>
 
-      {/* Mileage slider */}
-      <div className="flex items-center gap-4 mb-4">
+      <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
+        {/* THE SPINE */}
+        <div className="relative">
+          {shows.map((show, i) => {
+            const next = shows[i + 1];
+            const pairKey = next
+              ? `${show.event.date}|${show.event.city}|${next.event.date}|${next.event.city}`
+              : "";
+            const legMatch = next ? legByPair.get(pairKey) : undefined;
+            return (
+              <div key={`${show.event.date}-${show.event.city}-${i}`}>
+                <ShowRow
+                  show={show}
+                  index={i}
+                  radiusMiles={radiusMiles}
+                  provisional={provisionalKeys.has(
+                    `${show.event.date}|${show.event.city}`,
+                  )}
+                  selected={
+                    selectedLeg === i ||
+                    (legMatch && selectedLeg === legMatch.index)
+                      ? true
+                      : false
+                  }
+                  onRemove={
+                    show.event.venue === "PROVISIONAL"
+                      ? () =>
+                          removeProvisional(show.event.date, show.event.city)
+                      : undefined
+                  }
+                  onSelect={() => setSelectedLeg(null)}
+                />
+                {legMatch && (
+                  <LegConnector
+                    leg={legMatch.leg}
+                    legIndex={legMatch.index}
+                    open={selectedLeg === legMatch.index}
+                    onToggle={() =>
+                      setSelectedLeg(
+                        selectedLeg === legMatch.index ? null : legMatch.index,
+                      )
+                    }
+                    onAccept={acceptSuggestion}
+                    acceptedKeys={provisionalKeys}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* MAP — spatial twin */}
+        <div>
+          <TourMap
+            stops={result.mapData.stops}
+            customerPoints={result.mapData.customerPoints}
+            suggestions={mapSuggestions}
+            radiusMiles={radiusMiles}
+            selectedLeg={selectedLeg}
+            provisionalKeys={provisionalKeys}
+            onSelectStop={() => setSelectedLeg(null)}
+            onSelectLeg={(i) => setSelectedLeg(selectedLeg === i ? null : i)}
+          />
+          <div className="mono text-ink/35 text-xs mt-1 flex flex-wrap gap-x-4">
+            <span>
+              <span className="text-red">●</span> TOUR STOP
+            </span>
+            <span>
+              <span className="text-blue">◇</span> FILL CANDIDATE
+            </span>
+            <span>FAN DENSITY · cold→hot</span>
+            {selectedLeg !== null && result.legs[selectedLeg] && (
+              <span className="text-ink/55">
+                SELECTED · {result.legs[selectedLeg].fromCity} →{" "}
+                {result.legs[selectedLeg].toCity}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sticky radius lens */}
+      <div className="sticky bottom-0 bg-cream/95 backdrop-blur border-t border-ink/15 mt-5 py-3 flex items-center gap-4">
         <span className="mono text-ink/55 shrink-0">
           RADIUS · {radiusMiles}MI
         </span>
@@ -254,157 +409,338 @@ function CrossoverResult({
           className="flex-1 accent-red"
         />
         <span className="mono text-ink/35 shrink-0 hidden sm:inline">
-          drag to widen reach + routing corridor
+          recounts reach · widens fill corridor
         </span>
       </div>
 
-      {/* Map */}
-      <div className="mb-5">
-        <TourMap
-          stops={result.mapData.stops}
-          customerPoints={result.mapData.customerPoints}
-          suggestions={result.mapData.suggestions}
+      {/* Untapped shelf + verdict */}
+      <UntappedShelf
+        result={result}
+        planOpen={planOpen}
+        setPlanOpen={setPlanOpen}
+      />
+
+      <div className="mt-4 serif-italic text-ink/45 text-xs">
+        Straight-line (great-circle) miles from city centers — close enough to
+        rank routing. Customers without a recognizable US city aren&apos;t
+        plotted.
+      </div>
+    </div>
+  );
+}
+
+// ── show row ────────────────────────────────────────────────────────────────
+function ShowRow({
+  show,
+  index,
+  radiusMiles,
+  provisional,
+  selected,
+  onRemove,
+  onSelect,
+}: {
+  show: CustomerCrossover["perEvent"][number];
+  index: number;
+  radiusMiles: number;
+  provisional: boolean;
+  selected: boolean;
+  onRemove?: () => void;
+  onSelect: () => void;
+}) {
+  const useRadius = show.lat !== undefined && show.lng !== undefined;
+  const count = useRadius ? show.withinRadiusCount : show.sameStateCount;
+  const offFanbase = useRadius && show.withinRadiusCount === 0;
+
+  return (
+    <div className="relative pl-10 py-2.5" onClick={onSelect}>
+      {/* rail */}
+      <div className="absolute left-[1.05rem] inset-y-0 w-px bg-ink/15" />
+      <span
+        className="absolute left-[0.55rem] top-3 w-3 h-3 rounded-full border-2"
+        style={{
+          background: provisional
+            ? "#F4EFE6"
+            : selected
+              ? "#F23222"
+              : "#0A0A0A",
+          borderColor: provisional ? "#1E2DDB" : "#F23222",
+          borderStyle: provisional ? "dashed" : "solid",
+        }}
+      />
+      <div className="flex items-baseline gap-3">
+        <span className="mono text-ink/55 shrink-0 w-28">
+          {fmtDay(show.event.date)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium truncate">
+            {show.event.venue === "PROVISIONAL" ? (
+              <span className="text-blue mono">PROVISIONAL</span>
+            ) : (
+              show.event.venue || "Venue TBD"
+            )}
+          </div>
+        </div>
+        <span className="mono text-ink/60 shrink-0 text-right">
+          {(show.event.city || "?").toUpperCase()}
+        </span>
+        {onRemove && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            className="mono text-ink/40 hover:text-red shrink-0"
+            title="Remove provisional stop"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {/* fan chip */}
+      <div className="ml-[7.75rem] mt-0.5 flex items-center gap-2 mono text-xs">
+        <FanChip
+          count={count}
           radiusMiles={radiusMiles}
+          useRadius={useRadius}
+          stateCode={show.stateCode}
         />
-        <div className="mono text-ink/35 text-xs mt-1 flex flex-wrap gap-x-4">
-          <span>
-            <span className="text-red">●</span> TOUR STOP
-          </span>
-          <span>
-            <span className="text-blue">●</span> SUGGESTED STOP
-          </span>
-          <span>🔥 CUSTOMER DENSITY</span>
-        </div>
+        {show.sameCityCount > 0 && (
+          <span className="text-red">★ {show.sameCityCount} IN CITY</span>
+        )}
+        {offFanbase && <span className="text-ink/40">⚑ OFF FANBASE</span>}
       </div>
+    </div>
+  );
+}
 
-      <div className="grid md:grid-cols-2 gap-x-10 gap-y-6">
-        {/* 01 — Existing stops */}
-        <div>
-          <div className="mono mb-3 pb-2 border-b border-ink/15">
-            01 — TOUR STOPS · CUSTOMER REACH
+function FanChip({
+  count,
+  radiusMiles,
+  useRadius,
+  stateCode,
+}: {
+  count: number;
+  radiusMiles: number;
+  useRadius: boolean;
+  stateCode: string | null;
+}) {
+  const blocks = count === 0 ? "░░" : count < 15 ? "▓░" : "▓▓";
+  return (
+    <span className="text-ink/55">
+      <span className={count > 0 ? "text-ink" : "text-ink/25"}>{blocks}</span>{" "}
+      {count} {useRadius ? `≤${radiusMiles}MI` : `IN ${stateCode ?? "?"}`}
+    </span>
+  );
+}
+
+// ── leg connector ────────────────────────────────────────────────────────────
+function LegConnector({
+  leg,
+  legIndex,
+  open,
+  onToggle,
+  onAccept,
+  acceptedKeys,
+}: {
+  leg: Leg;
+  legIndex: number;
+  open: boolean;
+  onToggle: () => void;
+  onAccept: (s: RoutingSuggestion) => void;
+  acceptedKeys: Set<string>;
+}) {
+  const d = legDisplay(leg);
+  const hasFills = leg.suggestions.length > 0;
+  return (
+    <div className="relative pl-10">
+      {/* rail segment */}
+      <div
+        className={`absolute left-[1.05rem] -translate-x-1/2 inset-y-0 ${d.railWidth} ${d.railColor}`}
+      />
+      <button
+        onClick={onToggle}
+        className={`w-full text-left py-1.5 flex items-center gap-2 mono text-xs ${d.color} ${
+          hasFills ? "hover:opacity-70" : "cursor-default"
+        }`}
+        disabled={!hasFills}
+      >
+        <span className="tracking-tight">
+          {d.dark ? "⚑ " : ""}
+          {leg.segmentMiles.toLocaleString()} MI
+        </span>
+        <span className="text-ink/30">{"▌".repeat(d.slack)}</span>
+        <span>
+          · {leg.gapDays} DAY{leg.gapDays === 1 ? "" : "S"} · {d.verdict}
+        </span>
+        {hasFills && (
+          <span className="ml-auto text-ink/45">
+            {open ? "▾" : "▸"} FILL ({leg.suggestions.length})
+          </span>
+        )}
+      </button>
+
+      {open && hasFills && (
+        <div className="ml-2 mb-2 border-l-2 border-blue/40 pl-3 space-y-1">
+          <div className="mono text-ink/45 text-xs">
+            FILL THIS GAP · ON-ROUTE FAN CITIES
           </div>
-          <div className="space-y-3">
-            {sortedEvents.map((e, i) => {
-              const useRadius = e.lat !== undefined && e.lng !== undefined;
-              const headline = useRadius
-                ? e.withinRadiusCount
-                : e.sameStateCount;
-              return (
-                <div key={i}>
-                  <div className="flex items-baseline gap-3">
-                    <span className="mono text-ink/55 w-20 shrink-0">
-                      {e.event.date}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium">
-                        {e.event.venue || "Venue TBD"}
-                      </div>
-                      <div className="text-sm text-ink/60">{e.event.city}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="display text-2xl">{headline}</div>
-                      <div className="mono text-ink/40">
-                        {useRadius
-                          ? `≤${radiusMiles}MI`
-                          : `IN ${e.stateCode ?? "?"}`}
-                      </div>
-                    </div>
-                  </div>
-                  {e.sameCityCount > 0 && (
-                    <div className="ml-[5.5rem] mt-1 mono text-red">
-                      ★ {e.sameCityCount} IN SAME CITY
-                    </div>
-                  )}
-                  {e.sampleCustomers.length > 0 && (
-                    <div className="ml-[5.5rem] mt-1 serif-italic text-ink/55 text-xs">
-                      e.g.{" "}
-                      {e.sampleCustomers
-                        .map(
-                          (c) => `${c.name ?? "(unnamed)"} (${c.city ?? "?"})`,
-                        )
-                        .join(", ")}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          {leg.suggestions.map((s, i) => {
+            const accepted = acceptedKeys.has(`${s.suggestedDate}|${s.city}`);
+            return (
+              <div key={i} className="flex items-baseline gap-2 text-sm">
+                <button
+                  onClick={() => onAccept(s)}
+                  disabled={accepted}
+                  className={`mono shrink-0 ${
+                    accepted ? "text-ink/30" : "text-blue hover:text-red"
+                  }`}
+                  title={accepted ? "Added" : "Add as provisional stop"}
+                >
+                  {accepted ? "✓" : "⊕"}
+                </button>
+                <span className="font-medium flex-1">
+                  {s.city}, {s.stateCode}
+                </span>
+                <span className="display text-base">{s.customers}</span>
+                <span className="mono text-ink/40 text-xs w-28 text-right">
+                  +{s.detourMiles}MI · ~{s.suggestedDate.slice(5)}
+                </span>
+              </div>
+            );
+          })}
         </div>
+      )}
+    </div>
+  );
+}
 
-        {/* 02 — Routing opportunities */}
-        <div>
-          <div className="mono mb-3 pb-2 border-b border-ink/15">
-            02 — 💡 ROUTING OPPORTUNITIES
-          </div>
-          {gapGroups.size === 0 ? (
-            <div className="serif-italic text-ink/55 text-sm">
-              No fillable gaps found — either no multi-day gaps between stops,
-              or no customer-dense cities sit on-route within {radiusMiles}mi.
-              Widen the radius to surface more.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {[...gapGroups.entries()].map(([key, sugs]) => {
-                const s0 = sugs[0];
-                return (
-                  <div key={key}>
-                    <div className="mono text-ink/50 text-xs mb-1">
-                      {s0.gapDays}-DAY GAP · {s0.fromCity} ({s0.fromDate}) →{" "}
-                      {s0.toCity} ({s0.toDate})
-                    </div>
-                    {sugs.map((s, i) => (
-                      <div
-                        key={i}
-                        className="flex items-baseline gap-3 ml-1 mb-1"
-                      >
-                        <span className="text-blue">→</span>
-                        <span className="font-medium flex-1">
-                          {s.city}, {s.stateCode}
-                        </span>
-                        <span className="display text-lg">{s.customers}</span>
-                        <span className="mono text-ink/40 text-xs w-28 text-right">
-                          +{s.detourMiles}mi · ~{s.suggestedDate.slice(5)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+// ── untapped markets + verdict + fan-first plan ──────────────────────────────
+function UntappedShelf({
+  result,
+  planOpen,
+  setPlanOpen,
+}: {
+  result: CustomerCrossover;
+  planOpen: boolean;
+  setPlanOpen: (b: boolean) => void;
+}) {
+  const [open, setOpen] = useState(true);
+  // Greedy nearest-neighbor chain through the densest untapped markets — a
+  // lightweight "if you toured your fans" proposal. Great-circle only.
+  const fanFirst = useMemo(() => {
+    const pts = result.untappedMarkets.slice(0, 8).map((m) => ({ ...m }));
+    if (pts.length < 2) return { order: pts, miles: 0 };
+    const used = new Set<number>();
+    const order: typeof pts = [];
+    let cur = 0; // start at densest
+    used.add(0);
+    order.push(pts[0]);
+    let miles = 0;
+    while (order.length < pts.length) {
+      let best = -1;
+      let bestD = Infinity;
+      for (let j = 0; j < pts.length; j++) {
+        if (used.has(j)) continue;
+        const dx = pts[cur].lat - pts[j].lat;
+        const dy = pts[cur].lng - pts[j].lng;
+        const dd = dx * dx + dy * dy;
+        if (dd < bestD) {
+          bestD = dd;
+          best = j;
+        }
+      }
+      if (best < 0) break;
+      // approximate miles via haversine-ish (degrees → miles rough)
+      const a = pts[cur];
+      const b = pts[best];
+      const R = 3958.8;
+      const toRad = Math.PI / 180;
+      const dLat = (b.lat - a.lat) * toRad;
+      const dLng = (b.lng - a.lng) * toRad;
+      const h =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(a.lat * toRad) *
+          Math.cos(b.lat * toRad) *
+          Math.sin(dLng / 2) ** 2;
+      miles += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+      used.add(best);
+      order.push(pts[best]);
+      cur = best;
+    }
+    return { order, miles: Math.round(miles) };
+  }, [result.untappedMarkets]);
 
-          {/* 03 — Untapped markets */}
-          <div className="mono mb-3 mt-6 pb-2 border-b border-ink/15">
-            03 — TOP UNTAPPED MARKETS · TOUR NEXT
+  const topMissed = result.untappedMarkets.slice(0, 3).map((m) => m.stateCode);
+  const uniqueMissedStates = [...new Set(topMissed)].join("/");
+
+  return (
+    <div className="mt-5 border-t border-ink/15 pt-3">
+      <button
+        onClick={() => setOpen(!open)}
+        className="mono text-ink/55 hover:text-ink flex items-center gap-2"
+      >
+        {open ? "▾" : "▸"} TOUR NEXT — TOP UNTAPPED MARKETS
+        <span className="text-ink/35">
+          (the fanbase this route never touches)
+        </span>
+      </button>
+
+      {open && (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-1 mt-3">
+            {result.untappedMarkets.map((m, i) => (
+              <div key={i} className="flex items-baseline gap-2">
+                <span className="mono text-ink/40 w-5">
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="font-medium flex-1 truncate">
+                  {m.city}, {m.stateCode}
+                </span>
+                <span className="display text-base">{m.customers}</span>
+              </div>
+            ))}
           </div>
-          {result.untappedMarkets.length === 0 ? (
-            <div className="serif-italic text-ink/55 text-sm">
-              Every dense customer city is already within range of a stop.
-              Strong routing.
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {result.untappedMarkets.map((m, i) => (
-                <div key={i} className="flex items-baseline gap-3">
-                  <span className="mono text-ink/40 w-5">
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                  <span className="font-medium flex-1">
+
+          <div className="mt-4 flex items-start gap-3">
+            <p className="serif-italic text-ink/75 flex-1">
+              ❯ This run reaches {Math.round(result.reachPct * 100)}% of the
+              fanbase
+              {uniqueMissedStates
+                ? ` — the densest untapped markets are in ${uniqueMissedStates}.`
+                : "."}{" "}
+              {result.reachPct < 0.25 &&
+                "The next routing should chase the fans, not the calendar."}
+            </p>
+            <button
+              onClick={() => setPlanOpen(!planOpen)}
+              className="mono shrink-0 px-3 h-8 border border-ink/30 hover:bg-ink hover:text-cream transition-colors"
+            >
+              {planOpen ? "HIDE PLAN" : "PLAN A FAN-FIRST RUN →"}
+            </button>
+          </div>
+
+          {planOpen && fanFirst.order.length > 1 && (
+            <div className="mt-3 border border-blue/30 p-3">
+              <div className="mono text-blue text-xs mb-2">
+                IF YOU TOURED YOUR FANS · greedy nearest-neighbor ·{" "}
+                {fanFirst.miles.toLocaleString()} MI
+              </div>
+              <div className="font-medium text-sm leading-relaxed">
+                {fanFirst.order.map((m, i) => (
+                  <span key={i}>
+                    {i > 0 && <span className="text-blue/50"> → </span>}
                     {m.city}, {m.stateCode}
+                    <span className="mono text-ink/40 text-xs">
+                      {" "}
+                      ({m.customers})
+                    </span>
                   </span>
-                  <span className="display text-lg">{m.customers}</span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="mt-5 serif-italic text-ink/45 text-xs">
-        Distances are straight-line (great-circle) from city centers — close
-        enough to rank routing detours. Customers without a recognizable US city
-        aren&apos;t mapped.
-      </div>
+        </>
+      )}
     </div>
   );
 }
