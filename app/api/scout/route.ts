@@ -234,10 +234,49 @@ async function processArtist(
       return true;
     });
 
+    // Deterministic signal post-processor — belt-and-suspenders over the LLM.
+    // The synth rules say "active-touring if any upcoming events exist" and
+    // "recent-release if any release in last 30 days" — these are facts about
+    // the data, not LLM judgments. When the LLM is conservative (Cerebras
+    // gpt-oss-120b under quota pressure has shown this) or hallucinates an
+    // empty signals array, we still force in the signals the raw data demands.
+    // This closes the LLM-reliability gap permanently for the objective rules
+    // while leaving the subjective ones (between-cycles, quiet, industry-writer)
+    // to the LLM's judgment where context actually matters.
+    const llmSignals = new Set(synth.signals ?? []);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const ninetyDaysHence = new Date(
+      today.getTime() + 90 * 24 * 60 * 60 * 1000,
+    );
+    const hasUpcomingEvent = mergedEvents.some((e) => {
+      if (!e.date) return false;
+      const d = new Date(e.date);
+      return !isNaN(d.getTime()) && d >= today;
+    });
+    const hasRecentRelease = releases.some((r) => {
+      if (!r.date) return false;
+      const d = new Date(r.date);
+      return !isNaN(d.getTime()) && d >= thirtyDaysAgo && d <= ninetyDaysHence;
+    });
+    if (hasUpcomingEvent) {
+      llmSignals.add("active-touring");
+      // If the LLM defaulted to "quiet" or "between-cycles" out of caution
+      // but events DO exist, those negative-label signals contradict reality.
+      llmSignals.delete("quiet");
+      llmSignals.delete("between-cycles");
+    }
+    if (hasRecentRelease) {
+      llmSignals.add("recent-release");
+      llmSignals.delete("quiet"); // can't be quiet with a fresh release
+    }
+    const finalSignals = Array.from(llmSignals);
+
     const report: ArtistReport = {
       name,
       summary: synth.summary,
-      signals: synth.signals,
+      signals: finalSignals,
       followers: bit?.followers,
       bandsintownUrl: bit?.url,
       releases,
