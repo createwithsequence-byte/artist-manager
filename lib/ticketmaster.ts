@@ -135,11 +135,15 @@ export async function getTicketmasterEvents(
       if (!date || !venue) return null;
       const city = venue.city?.name ?? "";
       const state = venue.state?.stateCode ?? "";
+      // city stays "Nashville, TN" (back-compat with anything that read the
+      // composite form). We ALSO emit state as its own field so the Customer
+      // Crossover can use it without re-parsing the city string.
       const cityFull = state ? `${city}, ${state}` : city;
       return {
         date,
         venue: venue.name ?? "TBD",
         city: cityFull,
+        state: state || undefined,
         ticketUrl: e.url,
       } as ArtistEvent;
     })

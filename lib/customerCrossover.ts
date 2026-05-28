@@ -176,17 +176,25 @@ export function crossover(
 
   // Per-event analysis
   const perEvent = events.map((event) => {
-    // Tour event has "city" which often includes state (e.g., "Cohasset, MA").
-    // Try to extract a state from it.
+    // Prefer explicit state when the orchestrator forwarded it (Ticketmaster
+    // and Spotify-federated paths both supply state codes natively, post
+    // sidecar v1.1 + ticketmaster.ts state-field-emit fixes). Fall back to
+    // regex-extracting from the city string for any legacy event payload
+    // (older cached reports, edge cases) where city is "Cohasset, MA" but
+    // the discrete state field is missing.
     const cityField = event.city ?? "";
-    const stateMatch = cityField.match(
-      /,\s*([A-Z]{2})\b|,\s*([A-Za-z][A-Za-z\s.]+?)\s*$/,
-    );
-    let stateCode: string | null = null;
-    if (stateMatch) {
-      stateCode = stateMatch[1]
-        ? stateMatch[1].toUpperCase()
-        : normalizeState(stateMatch[2]);
+    let stateCode: string | null = event.state
+      ? normalizeState(event.state)
+      : null;
+    if (!stateCode) {
+      const stateMatch = cityField.match(
+        /,\s*([A-Z]{2})\b|,\s*([A-Za-z][A-Za-z\s.]+?)\s*$/,
+      );
+      if (stateMatch) {
+        stateCode = stateMatch[1]
+          ? stateMatch[1].toUpperCase()
+          : normalizeState(stateMatch[2]);
+      }
     }
     // Pull just the city name part for city-match attempts
     const cityPart = cityField.split(",")[0].trim().toLowerCase();

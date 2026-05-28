@@ -207,6 +207,14 @@ def _extract_concerts(goods: dict) -> list[dict]:
             "date": date,
             "venue": loc.get("name") or "TBD",
             "city": loc.get("city") or "?",
+            # State/region code — crucial for the Customer Crossover panel to
+            # match tour stops against customer locations. Without this every
+            # Spotify-federated concert reads as "Spring Hill, ?" because the
+            # city alone doesn't disambiguate (Spring Hill exists in TN, FL,
+            # KS, etc.). Top-cities already pulls `region` from the same
+            # location shape — _extract_concerts was just missing it.
+            "region": loc.get("region"),
+            "country": loc.get("country"),
             "festival": bool(d.get("festival")),
             "uri": d.get("uri"),
             "concertUrl": d.get("concertUrl") or d.get("url"),

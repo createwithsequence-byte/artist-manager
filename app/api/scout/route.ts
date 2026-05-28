@@ -207,6 +207,10 @@ async function processArtist(
       date: c.date,
       venue: c.venue,
       city: c.city,
+      // Forward region (state code) so Customer Crossover can match against
+      // customer states without regex-extracting from a bare city string.
+      // Spotify-federated payloads carry it; sidecar v1.1 surfaces it.
+      state: c.region,
       ticketUrl: c.concertUrl,
     }));
     // Dedup key normalization: TM emits "Nashville, TN", Spotify emits just

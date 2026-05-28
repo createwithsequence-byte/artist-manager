@@ -15,6 +15,16 @@ export type Event = {
   date: string;
   venue: string;
   city: string;
+  /**
+   * 2-letter state/region code (e.g. "TN", "CA"). Surfaces from:
+   *   - Ticketmaster events (venue.state.stateCode)
+   *   - Spotify-federated concerts (location.region) [sidecar v1.1+]
+   * Used by lib/customerCrossover.ts to match tour stops against customers
+   * WITHOUT having to regex-extract a state suffix from the city string —
+   * which fails for indie artists whose data comes from the Spotify-fed
+   * path where city is bare ("Spring Hill", not "Spring Hill, TN").
+   */
+  state?: string;
   ticketUrl?: string;
   withArtist?: string;
 };
@@ -49,6 +59,11 @@ export type SpotifyConcert = {
   date: string; // YYYY-MM-DD
   venue: string;
   city: string;
+  /** 2-letter state/region code, e.g. "TN" — pulled from location.region
+   *  in the Spotify GraphQL response. Optional because some non-US shows
+   *  return null region. */
+  region?: string;
+  country?: string;
   festival?: boolean;
   uri?: string;
   concertUrl?: string;
