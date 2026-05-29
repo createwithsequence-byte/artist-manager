@@ -278,7 +278,10 @@ function RoutingSheet({
     setProvisional(buildRevisedTour(baseline));
   };
   const resetRevised = () => setProvisional([]);
-  const reachDeltaPts = Math.round((result.reachPct - baseline.reachPct) * 100);
+  // Diff the DISPLAYED (rounded) percentages so "14% → 17%" reads as "+3pts",
+  // never a rounding-artifact "+2pts".
+  const reachDeltaPts =
+    Math.round(result.reachPct * 100) - Math.round(baseline.reachPct * 100);
   const addedMiles = Math.max(
     0,
     result.totalRouteMiles - baseline.totalRouteMiles,
