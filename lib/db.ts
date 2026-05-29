@@ -43,6 +43,18 @@ export async function ensureSchema(): Promise<void> {
     model TEXT PRIMARY KEY,
     exhausted_at_ms INTEGER NOT NULL
   )`);
+  // Master Artist Library — identity-keyed (Spotify-URL → spotify.id →
+  // normalized name), so every scout (solo or group) lands in ONE durable
+  // store regardless of which CSV it came from. csv_origin is mere metadata
+  // (where we first saw them). scouted_at is preserved on first insert.
+  await db.execute(`CREATE TABLE IF NOT EXISTS artist_library (
+    identity TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    report TEXT NOT NULL,
+    csv_origin TEXT,
+    scouted_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
   _schemaReady = true;
 }
 

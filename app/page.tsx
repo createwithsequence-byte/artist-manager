@@ -102,6 +102,26 @@ export default function Home() {
       );
   }, []);
 
+  // Master Artist Library — every scouted artist, identity-keyed, persistent
+  // across CSVs. libraryMode means the current view is the union library
+  // (loaded directly, not via a CSV bucket).
+  const [libraryCount, setLibraryCount] = useState(0);
+  const [libraryMode, setLibraryMode] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/library")
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d?.count === "number") setLibraryCount(d.count);
+      })
+      .catch((err) =>
+        console.warn(
+          "[LIBRARY]",
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+  }, []);
+
   // Batch deep-dive state
   const [diveBatch, setDiveBatch] = useState<{
     running: boolean;
@@ -223,6 +243,7 @@ export default function Home() {
   // Always write to localStorage (instant, offline-safe).
   // Also debounce-push to Turso when configured.
   useEffect(() => {
+    if (libraryMode) return; // viewing the library — don't re-save as a bucket
     if (!cacheKey) return;
     if (reports.length === 0 && errors.length === 0) return;
     try {
@@ -240,7 +261,29 @@ export default function Home() {
         body: JSON.stringify({ csv_name: fileName, reports }),
       }).catch((err) => console.warn("[TURSO] sync failed:", err));
     }, 1500);
-  }, [reports, errors, cacheKey, fileName, persistenceMode]);
+  }, [reports, errors, cacheKey, fileName, persistenceMode, libraryMode]);
+
+  // Mirror every scouted report into the master library (identity-keyed) so
+  // solo lookups AND group scouts persist in one durable store, regardless of
+  // CSV. Debounced so a long scout upserts once it settles. Skipped in
+  // libraryMode (those already live there).
+  const libSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (libraryMode) return;
+    if (persistenceMode !== "turso") return;
+    if (reports.length === 0) return;
+    if (libSyncTimerRef.current) clearTimeout(libSyncTimerRef.current);
+    libSyncTimerRef.current = setTimeout(() => {
+      fetch("/api/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reports,
+          csvOrigin: fileName || (singleLookupArtist ? "single-lookup" : null),
+        }),
+      }).catch((err) => console.warn("[LIBRARY] sync failed:", err));
+    }, 1500);
+  }, [reports, persistenceMode, fileName, libraryMode, singleLookupArtist]);
 
   const detectNameColumn = (rows: ParsedRow[]): string | null => {
     if (!rows.length) return null;
@@ -598,6 +641,34 @@ export default function Home() {
     resetAll();
   };
 
+  // Load the master library into the view (the union of every scouted artist).
+  const openLibrary = async () => {
+    try {
+      const res = await fetch("/api/library?full=1");
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "library load failed");
+      const entries: { report: ArtistReport }[] = Array.isArray(d.entries)
+        ? d.entries
+        : [];
+      setLibraryMode(true);
+      setRows(null);
+      setFileName("");
+      setErrors([]);
+      setSingleLookupArtist(null);
+      setReports(entries.map((e) => normalizeReport(e.report)));
+      setState("done");
+      setLibraryCount(entries.length);
+    } catch (err) {
+      console.warn("[LIBRARY] open failed:", err);
+    }
+  };
+  const exitLibrary = () => {
+    setLibraryMode(false);
+    setReports([]);
+    setErrors([]);
+    setState("idle");
+  };
+
   // A "stub" is a report whose synth fell back to the dummy summary because
   // every LLM provider was exhausted at synthesis time. They still hold raw
   // data (Spotify, events, releases) but have no signals or written summary,
@@ -667,7 +738,7 @@ export default function Home() {
         hasCsv={!!rows}
         onImport={() => fileInput.current?.click()}
         onRun={runScout}
-        onReset={hasResults ? resetAll : clearCsv}
+        onReset={libraryMode ? exitLibrary : hasResults ? resetAll : clearCsv}
         canRun={remaining.length > 0}
         persistenceMode={persistenceMode}
       />
@@ -705,6 +776,23 @@ export default function Home() {
             onClick={exitSingleLookup}
             className="mono ml-auto text-cream/60 hover:text-red transition-colors"
             title="Exit single-artist mode and return to upload"
+          >
+            ✕ EXIT
+          </button>
+        </div>
+      )}
+
+      {libraryMode && (
+        <div className="bg-ink text-cream px-5 py-2 flex items-center gap-3">
+          <span className="mono text-cream/60">★ ARTIST LIBRARY</span>
+          <span className="font-medium">
+            {reports.length} artist{reports.length === 1 ? "" : "s"} · everyone
+            you&apos;ve scouted
+          </span>
+          <button
+            onClick={exitLibrary}
+            className="mono ml-auto text-cream/60 hover:text-red transition-colors"
+            title="Exit the library and return to upload"
           >
             ✕ EXIT
           </button>
@@ -795,10 +883,34 @@ export default function Home() {
                 </button>
               </form>
               <div className="serif-italic text-ink/55 text-sm mt-2">
-                One-off triage. Result is ephemeral — not saved to Turso. Drop a
-                customer CSV inside the expanded row for tour-overlap analysis.
+                One-off triage that sticks — every lookup is saved to your
+                Library below. Drop a customer CSV inside the expanded row for
+                tour-overlap analysis.
               </div>
             </div>
+
+            {libraryCount > 0 && (
+              <div className="mt-10">
+                <div className="mono text-ink/50 mb-3">
+                  ↳ OR OPEN YOUR LIBRARY
+                </div>
+                <button
+                  onClick={openLibrary}
+                  className="w-full text-left flex items-baseline gap-4 px-4 py-3 border border-ink/25 hover:bg-ink hover:text-cream transition-colors group"
+                >
+                  <span className="display text-xl">★ ARTIST LIBRARY</span>
+                  <span className="mono text-ink/55 group-hover:text-cream/70 shrink-0">
+                    {libraryCount} ARTISTS
+                  </span>
+                  <span className="serif-italic text-ink/45 group-hover:text-cream/60 flex-1 hidden sm:block">
+                    everyone you&apos;ve ever scouted — solo or in a roster
+                  </span>
+                  <span className="mono text-ink/40 group-hover:text-cream shrink-0">
+                    →
+                  </span>
+                </button>
+              </div>
+            )}
 
             {recentCsvs.length > 0 && (
               <div className="mt-10">
