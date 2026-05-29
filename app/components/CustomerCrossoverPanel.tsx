@@ -449,9 +449,14 @@ function ShowRow({
   onRemove?: () => void;
   onSelect: () => void;
 }) {
+  const [whoOpen, setWhoOpen] = useState(false);
   const useRadius = show.lat !== undefined && show.lng !== undefined;
   const count = useRadius ? show.withinRadiusCount : show.sameStateCount;
   const offFanbase = useRadius && show.withinRadiusCount === 0;
+  const nearby = show.nearby ?? [];
+  const inCity = nearby.find((n) => n.isSameCity);
+  const secondary = nearby.filter((n) => !n.isSameCity);
+  const hasWho = nearby.length > 0;
 
   return (
     <div className="relative pl-10 py-2.5" onClick={onSelect}>
@@ -510,7 +515,65 @@ function ShowRow({
           <span className="text-red">★ {show.sameCityCount} IN CITY</span>
         )}
         {offFanbase && <span className="text-ink/40">⚑ OFF FANBASE</span>}
+        {hasWho && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setWhoOpen((v) => !v);
+            }}
+            className="text-ink/45 hover:text-ink"
+          >
+            {whoOpen ? "▾ WHO" : "▸ WHO"}
+          </button>
+        )}
       </div>
+
+      {/* who — actual customers within radius, grouped by city */}
+      {whoOpen && hasWho && (
+        <div className="ml-[7.75rem] mt-1.5 space-y-1.5">
+          {inCity && <NearbyCity group={inCity} accent />}
+          {secondary.length > 0 && (
+            <div className="space-y-1">
+              <div className="mono text-ink/40 text-[0.65rem]">
+                NEARBY ≤{radiusMiles}MI
+              </div>
+              {secondary.map((g, i) => (
+                <NearbyCity key={i} group={g} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NearbyCity({
+  group,
+  accent,
+}: {
+  group: {
+    city: string;
+    stateCode: string;
+    count: number;
+    names: string[];
+  };
+  accent?: boolean;
+}) {
+  const extra = group.count - group.names.length;
+  return (
+    <div className="text-xs leading-snug">
+      <span className={`mono ${accent ? "text-red" : "text-ink/55"}`}>
+        {accent ? "★ " : ""}
+        {group.city.toUpperCase()}, {group.stateCode} ({group.count})
+      </span>{" "}
+      <span className="text-ink/70">
+        {group.names.join(" · ")}
+        {extra > 0 && <span className="text-ink/40"> +{extra} more</span>}
+        {group.names.length === 0 && (
+          <span className="text-ink/40">(names not in file)</span>
+        )}
+      </span>
     </div>
   );
 }

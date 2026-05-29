@@ -145,6 +145,16 @@ export type CustomerCrossover = {
     /** Customers within `radiusMiles` of this stop (0 if stop not geocoded). */
     withinRadiusCount: number;
     sampleCustomers: Customer[];
+    /** Within-radius customers grouped by their city — the venue's own city
+     *  first (isSameCity), then secondary cities the radius pulls in. Each
+     *  carries actual customer names for outreach. */
+    nearby: Array<{
+      city: string;
+      stateCode: string;
+      count: number;
+      isSameCity: boolean;
+      names: string[];
+    }>;
     lat?: number;
     lng?: number;
   }>;
@@ -345,15 +355,48 @@ export function crossover(
       : [];
 
     let withinRadiusCount = 0;
+    const nearbyMap = new Map<
+      string,
+      {
+        city: string;
+        stateCode: string;
+        count: number;
+        isSameCity: boolean;
+        names: string[];
+      }
+    >();
     if (coords) {
       normalized.forEach((c, idx) => {
         if (!c._coords) return;
         if (haversineMiles(coords, c._coords) <= radiusMiles) {
           withinRadiusCount += 1;
           reachedIdx.add(idx);
+          // Bucket this within-radius customer by their city, keeping names.
+          const ckey = `${c._cityKey}|${c._stateCode}`;
+          let b = nearbyMap.get(ckey);
+          if (!b) {
+            b = {
+              city: c.city ?? c._cityKey ?? "?",
+              stateCode: c._stateCode ?? stateCode ?? "?",
+              count: 0,
+              isSameCity: c._cityKey === bareCity && c._stateCode === stateCode,
+              names: [],
+            };
+            nearbyMap.set(ckey, b);
+          }
+          b.count += 1;
+          if (c.name && b.names.length < 12) b.names.push(c.name);
         }
       });
     }
+    // Same-city first, then densest secondary cities.
+    const nearby = [...nearbyMap.values()].sort((a, b) =>
+      a.isSameCity !== b.isSameCity
+        ? a.isSameCity
+          ? -1
+          : 1
+        : b.count - a.count,
+    );
 
     return {
       event,
@@ -365,6 +408,7 @@ export function crossover(
         sameCity.slice(0, 5).length > 0
           ? sameCity.slice(0, 5)
           : sameState.slice(0, 5),
+      nearby,
       lat: coords?.[0],
       lng: coords?.[1],
     };
