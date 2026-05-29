@@ -491,5 +491,12 @@ export async function generateWithRetry(
     }
   }
 
+  // No Cerebras configured: if Groq was tried and failed, surface BOTH causes
+  // (the bare Gemini error alone hides that Groq was the actual final failure).
+  if (groqErr) {
+    throw new Error(
+      `LLM fallback failed. Gemini: ${lastErr instanceof Error ? lastErr.message.slice(0, 120) : "n/a"} | Groq: ${groqErr instanceof Error ? groqErr.message.slice(0, 120) : String(groqErr).slice(0, 120)}`,
+    );
+  }
   throw lastErr;
 }

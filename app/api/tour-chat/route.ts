@@ -123,14 +123,23 @@ Respond as JSON matching the schema. Reason over the snapshot + the user's messa
       if (!m) throw new Error("Non-JSON LLM response");
       parsed = JSON.parse(m[0]);
     }
-    // Defensive: ensure shape.
+    // Defensive: ensure shape + validate dates. The LLM can emit a malformed
+    // or non-calendar "date" ("June 2026", "TBD"); drop those rather than let
+    // them flow into the tour as a stop the spine can't place chronologically.
+    const isValidDate = (d: string) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(d) &&
+      !Number.isNaN(new Date(`${d}T00:00:00`).getTime());
     const result: TourChatResult = {
       reply: typeof parsed.reply === "string" ? parsed.reply : "(no reply)",
       proposedStops: Array.isArray(parsed.proposedStops)
         ? parsed.proposedStops
             .filter(
               (s) =>
-                s && typeof s.date === "string" && typeof s.city === "string",
+                s &&
+                typeof s.date === "string" &&
+                isValidDate(s.date) &&
+                typeof s.city === "string" &&
+                s.city.trim().length > 0,
             )
             .map((s) => ({
               date: s.date,

@@ -122,7 +122,9 @@ export type Leg = {
 };
 
 export type CustomerCrossover = {
-  /** Total parseable customer rows (excludes ones missing state). */
+  /** Total parseable customer rows, incl. rows whose state couldn't be
+   *  resolved (those sit in the denominator but can never be "reached"; see
+   *  droppedCount). reachPct uses this same denominator. */
   totalCustomers: number;
   /** Unique states represented in the customer list. */
   uniqueStates: number;
@@ -483,6 +485,15 @@ export function crossover(
         legSuggestions.push(sug);
         routingSuggestions.push(sug);
       }
+      // Stagger fill dates across the gap so accepting 2-3 fills from one leg
+      // (manual ⊕ path) doesn't create same-day shows in different cities.
+      legSuggestions.forEach((s, i) => {
+        s.suggestedDate = dateAtFraction(
+          A.event.date,
+          B.event.date,
+          (i + 1) / (legSuggestions.length + 1),
+        );
+      });
     }
 
     legs.push({

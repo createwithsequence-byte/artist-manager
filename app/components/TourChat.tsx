@@ -15,7 +15,7 @@ export function TourChat({
   onApplyStops,
 }: {
   context: string;
-  onApplyStops: (stops: ProposedStop[]) => void;
+  onApplyStops: (stops: ProposedStop[]) => { placed: number; dropped: number };
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -44,19 +44,41 @@ export function TourChat({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ context, messages, userMessage }),
+        signal: AbortSignal.timeout(65000),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      // Read text first — a non-JSON 5xx (gateway/timeout HTML) would make
+      // res.json() throw and mask the real failure as a parser error.
+      const rawText = await res.text();
+      let data: {
+        reply?: string;
+        proposedStops?: ProposedStop[];
+        error?: string;
+      };
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error(
+          `Agent unavailable (HTTP ${res.status}). Try again in a moment.`,
+        );
+      }
+      if (!res.ok)
+        throw new Error(data.error || `Agent error (HTTP ${res.status}).`);
       const assistantIdx = nextMessages.length; // index of the assistant msg
       setMessages([
         ...nextMessages,
         { role: "assistant", content: data.reply ?? "(no reply)" },
       ]);
       if (Array.isArray(data.proposedStops) && data.proposedStops.length > 0) {
-        setProposals((p) => ({ ...p, [assistantIdx]: data.proposedStops }));
+        setProposals((p) => ({ ...p, [assistantIdx]: data.proposedStops! }));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg =
+        err instanceof Error && err.name === "TimeoutError"
+          ? "The agent timed out — try again, or simplify the ask."
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      setError(msg);
     } finally {
       setLoading(false);
       requestAnimationFrame(() => {
@@ -171,9 +193,12 @@ function ProposalBlock({
   onApply,
 }: {
   stops: ProposedStop[];
-  onApply: () => void;
+  onApply: () => { placed: number; dropped: number };
 }) {
-  const [applied, setApplied] = useState(false);
+  const [applied, setApplied] = useState<{
+    placed: number;
+    dropped: number;
+  } | null>(null);
   return (
     <div className="mt-2 border-l-2 border-blue/40 pl-3 space-y-1">
       <div className="mono text-blue text-[0.65rem]">
@@ -191,14 +216,15 @@ function ProposalBlock({
         </div>
       ))}
       <button
-        onClick={() => {
-          onApply();
-          setApplied(true);
-        }}
-        disabled={applied}
+        onClick={() => setApplied(onApply())}
+        disabled={!!applied}
         className="mono text-xs mt-1 px-3 h-8 bg-blue text-cream hover:bg-ink transition-colors disabled:opacity-40"
       >
-        {applied ? "✓ APPLIED TO TOUR" : `APPLY ${stops.length} TO TOUR →`}
+        {applied
+          ? applied.dropped > 0
+            ? `✓ APPLIED ${applied.placed} OF ${stops.length} — ${applied.dropped} NOT FOUND`
+            : `✓ APPLIED ${applied.placed} TO TOUR`
+          : `APPLY ${stops.length} TO TOUR →`}
       </button>
     </div>
   );

@@ -31,6 +31,10 @@ export default function Error({
 
   useEffect(() => {
     if (!isChunkError) return;
+    // window.name survives a reload but not a new tab — a storage-free guard
+    // so even when sessionStorage is blocked we reload at most once and then
+    // show the error UI instead of looping.
+    const NAME_FLAG = "am-chunk-reloaded";
     try {
       const KEY = "am:chunk-reload-ts";
       const last = Number(sessionStorage.getItem(KEY) || "0");
@@ -38,7 +42,9 @@ export default function Error({
       sessionStorage.setItem(KEY, String(Date.now()));
       window.location.reload();
     } catch {
-      // sessionStorage blocked (rare) — fall back to a plain reload once.
+      // sessionStorage blocked — use window.name as the one-shot guard.
+      if (window.name.includes(NAME_FLAG)) return;
+      window.name = `${window.name} ${NAME_FLAG}`.trim();
       window.location.reload();
     }
   }, [isChunkError]);

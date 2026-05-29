@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useDeferredValue, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Papa from "papaparse";
 import {
@@ -202,6 +202,10 @@ function RoutingSheet({
   const [selectedLeg, setSelectedLeg] = useState<number | null>(null);
   const [provisional, setProvisional] = useState<ArtistEvent[]>([]);
   const [planOpen, setPlanOpen] = useState(false);
+  // Defer the radius fed to the (two) crossover passes so dragging the slider
+  // stays responsive — the thumb + labels track the live value, the heavy
+  // recompute catches up a tick later.
+  const dRadius = useDeferredValue(radiusMiles);
 
   // Provisional what-if stops are appended to the event list; crossover
   // re-geocodes + re-sorts by date, so they slot into the spine + redraw the
@@ -218,10 +222,10 @@ function RoutingSheet({
   const result: CustomerCrossover = useMemo(
     () =>
       crossover(loaded.customers, allEvents, {
-        radiusMiles,
+        radiusMiles: dRadius,
         geocode: loaded.geocode,
       }),
-    [loaded, allEvents, radiusMiles],
+    [loaded, allEvents, dRadius],
   );
 
   // Baseline = anchored dates only. Used to compute the revised tour (so fills
@@ -230,10 +234,10 @@ function RoutingSheet({
   const baseline: CustomerCrossover = useMemo(
     () =>
       crossover(loaded.customers, events, {
-        radiusMiles,
+        radiusMiles: dRadius,
         geocode: loaded.geocode,
       }),
-    [loaded, events, radiusMiles],
+    [loaded, events, dRadius],
   );
 
   // Build the chronological spine: shows sorted by date, with the matching
@@ -259,6 +263,10 @@ function RoutingSheet({
   const acceptSuggestion = (s: RoutingSuggestion) => {
     const key = `${s.suggestedDate}|${s.city}`;
     if (provisionalKeys.has(key)) return;
+    // Reset selection: inserting a stop splits the gap and shifts every later
+    // leg index, so a held selectedLeg would open the wrong tray / fly the map
+    // to an unrelated leg.
+    setSelectedLeg(null);
     setProvisional((prev) => [
       ...prev,
       {
@@ -281,21 +289,38 @@ function RoutingSheet({
   };
   const resetRevised = () => setProvisional([]);
 
-  // The agent's proposed stops replace the current provisional set, so the
-  // spine/map/reach update through the same pipeline as ⊕ and BUILD.
-  const applyAgentStops = (stops: ProposedStop[]) => {
+  // Apply the agent's proposed stops. Validates each against the bundled
+  // lat/lng (a city we can't place would silently vanish from the map and
+  // dilute reach), MERGES into the existing provisional set (so manual ⊕
+  // fills / a built revised tour aren't discarded), dedupes by date|city, and
+  // returns counts so the chat can report "applied N of M (1 not found)".
+  const applyAgentStops = (
+    stops: ProposedStop[],
+  ): { placed: number; dropped: number } => {
     setSelectedLeg(null);
-    setProvisional(
-      stops.map(
-        (s) =>
-          ({
-            date: s.date,
-            city: s.city,
-            state: s.state,
-            venue: "PROVISIONAL",
-          }) as ArtistEvent,
-      ),
+    const placeable = stops.filter(
+      (s) =>
+        !!loaded.geocode[
+          `${s.city.toLowerCase().trim()}|${(s.state || "").toUpperCase()}`
+        ],
     );
+    const dropped = stops.length - placeable.length;
+    setProvisional((prev) => {
+      const seen = new Set(prev.map((p) => `${p.date}|${p.city}`));
+      const additions = placeable
+        .filter((s) => !seen.has(`${s.date}|${s.city}`))
+        .map(
+          (s) =>
+            ({
+              date: s.date,
+              city: s.city,
+              state: s.state,
+              venue: "PROVISIONAL",
+            }) as ArtistEvent,
+        );
+      return [...prev, ...additions];
+    });
+    return { placed: placeable.length, dropped };
   };
   // Diff the DISPLAYED (rounded) percentages so "14% → 17%" reads as "+3pts",
   // never a rounding-artifact "+2pts".
@@ -433,12 +458,7 @@ function RoutingSheet({
                   provisional={provisionalKeys.has(
                     `${show.event.date}|${show.event.city}`,
                   )}
-                  selected={
-                    selectedLeg === i ||
-                    (legMatch && selectedLeg === legMatch.index)
-                      ? true
-                      : false
-                  }
+                  selected={legMatch ? selectedLeg === legMatch.index : false}
                   onRemove={
                     show.event.venue === "PROVISIONAL"
                       ? () =>
