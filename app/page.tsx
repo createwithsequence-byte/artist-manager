@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import Papa from "papaparse";
 import { Toolbar } from "./components/Toolbar";
 import { ArtistRow } from "./components/ArtistRow";
@@ -108,6 +109,13 @@ export default function Home() {
   const [libraryCount, setLibraryCount] = useState(0);
   const [libraryMode, setLibraryMode] = useState(false);
 
+  // SF Customer World — count of the canonical "master" customer dataset so
+  // the home chip surfaces "your audience is X fans" without a click.
+  const [worldStats, setWorldStats] = useState<{
+    customerCount: number;
+    cityCount: number;
+  } | null>(null);
+
   useEffect(() => {
     fetch("/api/library")
       .then((r) => r.json())
@@ -117,6 +125,26 @@ export default function Home() {
       .catch((err) =>
         console.warn(
           "[LIBRARY]",
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    // Load the master-dataset meta. Light call (count + city_count only).
+    fetch("/api/customers")
+      .then((r) => r.json())
+      .then((d) => {
+        const master = Array.isArray(d?.datasets)
+          ? d.datasets.find((x: { id: string }) => x.id === "master")
+          : null;
+        if (master) {
+          setWorldStats({
+            customerCount: master.customerCount,
+            cityCount: master.cityCount,
+          });
+        }
+      })
+      .catch((err) =>
+        console.warn(
+          "[WORLD]",
           err instanceof Error ? err.message : String(err),
         ),
       );
@@ -911,6 +939,41 @@ export default function Home() {
                 </button>
               </div>
             )}
+
+            {/* SF World — the customer audience globe. Always present (the
+                empty-state version invites the first upload), but glows up
+                with stats once a master dataset is saved. Separate route
+                because it's a different lens on the data, not artist work. */}
+            <div className="mt-10">
+              <div className="mono text-ink/50 mb-3">
+                ↳ {worldStats ? "OR OPEN THE SF WORLD" : "OR MAP YOUR AUDIENCE"}
+              </div>
+              <Link
+                href="/customers"
+                className="w-full text-left flex items-baseline gap-4 px-4 py-3 border border-ink/25 hover:bg-ink hover:text-cream transition-colors group"
+              >
+                <span className="display text-xl">
+                  <span className="text-red group-hover:text-cream/90">◯</span>{" "}
+                  SF WORLD
+                </span>
+                {worldStats ? (
+                  <span className="mono text-ink/55 group-hover:text-cream/70 shrink-0">
+                    {worldStats.customerCount.toLocaleString()} FANS ·{" "}
+                    {worldStats.cityCount.toLocaleString()} CITIES
+                  </span>
+                ) : (
+                  <span className="mono text-ink/40 group-hover:text-cream/60 shrink-0">
+                    NO DATASET YET
+                  </span>
+                )}
+                <span className="serif-italic text-ink/45 group-hover:text-cream/60 flex-1 hidden sm:block">
+                  every customer on a 3D globe — upload once, browse forever
+                </span>
+                <span className="mono text-ink/40 group-hover:text-cream shrink-0">
+                  →
+                </span>
+              </Link>
+            </div>
 
             {recentCsvs.length > 0 && (
               <div className="mt-10">

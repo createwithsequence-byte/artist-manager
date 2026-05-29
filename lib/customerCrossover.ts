@@ -208,8 +208,61 @@ export function normalizeState(input: string | undefined): string | null {
   return STATE_NAME_TO_CODE[lower] ?? null;
 }
 
-function normalizeCity(input: string | undefined): string {
+export function normalizeCity(input: string | undefined): string {
   return (input ?? "").trim().toLowerCase();
+}
+
+/** Per-city customer aggregate — the shape the globe and flat map consume.
+ *  Pre-bucketed at upload time so the render path is zero-cost on load. */
+export type CityAggregate = {
+  city: string;
+  stateCode: string;
+  lat: number;
+  lng: number;
+  count: number;
+};
+
+/**
+ * Roll up a customer list into one row per geocoded city. Drops rows whose
+ * state can't be normalized or whose city|state isn't in the bundled
+ * US_CITY_LATLNG lookup — the globe/map can't render what it can't place.
+ * Returns the aggregate sorted by count descending so the heaviest cities
+ * land first (matters for the globe's draw-order: dense dots on top).
+ */
+export function aggregateByCity(
+  customers: Customer[],
+  geocode: GeocodeMap,
+): { aggregate: CityAggregate[]; dropped: number } {
+  const buckets = new Map<string, CityAggregate>();
+  let dropped = 0;
+  for (const c of customers) {
+    const stateCode = normalizeState(c.state);
+    const cityKey = normalizeCity(c.city);
+    if (!stateCode || !cityKey) {
+      dropped++;
+      continue;
+    }
+    const coords = geocode[`${cityKey}|${stateCode}`];
+    if (!coords) {
+      dropped++;
+      continue;
+    }
+    const key = `${cityKey}|${stateCode}`;
+    const existing = buckets.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      buckets.set(key, {
+        city: c.city ?? cityKey,
+        stateCode,
+        lat: coords[0],
+        lng: coords[1],
+        count: 1,
+      });
+    }
+  }
+  const aggregate = [...buckets.values()].sort((a, b) => b.count - a.count);
+  return { aggregate, dropped };
 }
 
 /** Great-circle distance in miles between two [lat,lng] points. */
@@ -651,4 +704,135 @@ export function buildRevisedTour(baseline: CustomerCrossover): ArtistEvent[] {
     });
   }
   return out;
+}
+
+// ───────────────────────────── TOUR HERE engine ──────────────────────────────
+// Future-tour proposal: route the artist through their densest UNTAPPED markets
+// from scratch, independent of any booked dates. Three strategies, same shape
+// out so the panel's spine/map pipeline consumes them identically.
+
+export type RoutingStyle = "geographic" | "density" | "corridor";
+
+export type ProposeFutureTourOptions = {
+  count: number;
+  startDate: string; // YYYY-MM-DD
+  spacingDays: number;
+  style?: RoutingStyle;
+  /** Pre-seed an existing untapped pool, e.g. from a current crossover. */
+  untapped: Array<{
+    city: string;
+    stateCode: string;
+    customers: number;
+    lat: number;
+    lng: number;
+  }>;
+  /** Optional axis for "corridor" — start from this lat/lng region. */
+  corridorAnchor?: LatLng;
+};
+
+/** Add N days to a YYYY-MM-DD date, returning YYYY-MM-DD. */
+function addDays(date: string, days: number): string {
+  const t = new Date(`${date}T12:00:00`).getTime();
+  if (Number.isNaN(t)) return date;
+  return new Date(t + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Propose a from-scratch tour through the fanbase.
+ *
+ * "geographic" (default): greedy nearest-neighbor through the top untapped
+ * markets — drivable, the way a booking agent would route. Starts at the
+ * densest market (or corridorAnchor's nearest), chains to closest next.
+ *
+ * "density": pure top-N by customer count, no routing — for fly-only artists
+ * anchoring marquee cities. Dates only.
+ *
+ * "corridor": greedy from a starting region, but only adding cities whose
+ * distance from the anchor stays under a soft cap (default 800mi) — keeps
+ * the run on one geographic axis (e.g. Southeast, West Coast).
+ */
+export function proposeFutureTour(
+  opts: ProposeFutureTourOptions,
+): ArtistEvent[] {
+  const style: RoutingStyle = opts.style ?? "geographic";
+  const requested = Math.max(1, Math.floor(opts.count));
+  const candidates = [...opts.untapped];
+  if (candidates.length === 0) return [];
+
+  let ordered: typeof candidates;
+
+  if (style === "density") {
+    ordered = candidates
+      .sort((a, b) => b.customers - a.customers)
+      .slice(0, requested);
+  } else {
+    // Greedy nearest-neighbor for both "geographic" and "corridor".
+    // Start = densest city (or, for corridor, the candidate nearest the anchor).
+    const used = new Set<number>();
+    const out: typeof candidates = [];
+    let startIdx = 0;
+    if (style === "corridor" && opts.corridorAnchor) {
+      let bestD = Infinity;
+      candidates.forEach((c, i) => {
+        const d = haversineMiles(opts.corridorAnchor as LatLng, [c.lat, c.lng]);
+        if (d < bestD) {
+          bestD = d;
+          startIdx = i;
+        }
+      });
+    } else {
+      // "geographic": start at densest
+      let bestPop = -1;
+      candidates.forEach((c, i) => {
+        if (c.customers > bestPop) {
+          bestPop = c.customers;
+          startIdx = i;
+        }
+      });
+    }
+    used.add(startIdx);
+    out.push(candidates[startIdx]);
+    const cap = 800; // corridor soft cap, miles from anchor
+    const anchor: LatLng | undefined =
+      style === "corridor"
+        ? (opts.corridorAnchor ?? [
+            candidates[startIdx].lat,
+            candidates[startIdx].lng,
+          ])
+        : undefined;
+    while (out.length < requested) {
+      const cur = out[out.length - 1];
+      let best = -1;
+      let bestD = Infinity;
+      for (let i = 0; i < candidates.length; i++) {
+        if (used.has(i)) continue;
+        if (anchor) {
+          const da = haversineMiles(anchor, [
+            candidates[i].lat,
+            candidates[i].lng,
+          ]);
+          if (da > cap) continue;
+        }
+        const d = haversineMiles(
+          [cur.lat, cur.lng],
+          [candidates[i].lat, candidates[i].lng],
+        );
+        if (d < bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      if (best < 0) break;
+      used.add(best);
+      out.push(candidates[best]);
+    }
+    ordered = out;
+  }
+
+  return ordered.map((c, i) => ({
+    date: addDays(opts.startDate, i * opts.spacingDays),
+    city: c.city,
+    state: c.stateCode,
+    venue: "PROVISIONAL",
+  })) as ArtistEvent[];
 }

@@ -55,6 +55,30 @@ export async function ensureSchema(): Promise<void> {
     scouted_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`);
+  // SF customer master — upload-once-browse-forever audience map. We store a
+  // pre-aggregated city roll-up (NOT raw rows) to keep the blob KB-sized and
+  // the globe render path zero-cost: no client-side bucketing on load.
+  // Multiple datasets allowed (id is user-chosen), but the canonical one is
+  // "master".
+  await db.execute(`CREATE TABLE IF NOT EXISTS customer_dataset (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    customer_count INTEGER NOT NULL,
+    city_count INTEGER NOT NULL,
+    aggregate TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+  // Raw customer rows — separate table because the JSON can be 5–25MB for a
+  // real Songfinch dataset and we don't want every aggregate-only call (home
+  // chip, globe load) paying that bandwidth. Loaded on demand by the routing
+  // crossover panel only. id mirrors customer_dataset.id so they share an
+  // identity space without FK enforcement (libSQL skips most FK checks anyway).
+  await db.execute(`CREATE TABLE IF NOT EXISTS customer_dataset_raw (
+    id TEXT PRIMARY KEY,
+    rows TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
   _schemaReady = true;
 }
 

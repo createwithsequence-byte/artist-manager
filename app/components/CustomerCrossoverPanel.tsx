@@ -1,16 +1,19 @@
 "use client";
 
-import { useDeferredValue, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Papa from "papaparse";
 import {
   crossover,
   buildRevisedTour,
+  aggregateByCity,
   parseCustomers,
+  proposeFutureTour,
   type Customer,
   type CustomerCrossover,
   type GeocodeMap,
   type Leg,
+  type RoutingStyle,
   type RoutingSuggestion,
 } from "@/lib/customerCrossover";
 import type { Event as ArtistEvent } from "@/lib/types";
@@ -39,8 +42,46 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [dragOver, setDragOver] = useState(false);
   const [radiusMiles, setRadiusMiles] = useState(60);
+  // Tracks whether the current ready state was hydrated from the SF World
+  // master dataset (vs uploaded locally this session). Drives the "USING
+  // MASTER" badge in the panel header so the source of truth is visible.
+  const [usingMaster, setUsingMaster] = useState(false);
   const inputId = `crossover-csv-${artistName.replace(/\W+/g, "-")}`;
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // On mount: try to hydrate from the canonical SF master dataset so the
+  // user doesn't re-upload the same CSV across sessions. Stays in idle if
+  // no master exists or Turso isn't configured — the drop zone takes over.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/customers?id=master&raw=1")
+      .then((r) => r.json())
+      .then(async (d) => {
+        if (cancelled) return;
+        if (d?.dataset && Array.isArray(d?.raw) && d.raw.length > 0) {
+          const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
+          if (cancelled) return;
+          setStage({
+            kind: "ready",
+            loaded: {
+              fileName: `★ MASTER · ${d.dataset.name}`,
+              customers: d.raw as Customer[],
+              geocode: US_CITY_LATLNG as unknown as GeocodeMap,
+            },
+          });
+          setUsingMaster(true);
+        }
+      })
+      .catch((err) =>
+        console.warn(
+          "[CROSSOVER]",
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleFile = (file: File) => {
     setStage({ kind: "parsing", fileName: file.name });
@@ -51,14 +92,43 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
         try {
           const customers = parseCustomers(result.data);
           const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
+          const geocode = US_CITY_LATLNG as unknown as GeocodeMap;
           setStage({
             kind: "ready",
             loaded: {
               fileName: file.name,
               customers,
-              geocode: US_CITY_LATLNG as unknown as GeocodeMap,
+              geocode,
             },
           });
+          setUsingMaster(false);
+
+          // Persist as the canonical SF master so SF World + future routing
+          // sessions hydrate from the same source. Replaces any existing
+          // master — Greg explicitly asked for "upload stays stored until a
+          // new one is integrated." Fire-and-forget; UI shouldn't block.
+          const { aggregate } = aggregateByCity(customers, geocode);
+          fetch("/api/customers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: "master",
+              name: file.name,
+              aggregate,
+              customerCount: customers.length,
+              raw: customers,
+            }),
+          })
+            .then((r) => r.json())
+            .then((d) => {
+              if (d?.ok) setUsingMaster(true);
+            })
+            .catch((err) =>
+              console.warn(
+                "[CROSSOVER] master persist failed:",
+                err instanceof Error ? err.message : String(err),
+              ),
+            );
         } catch (err) {
           setStage({
             kind: "error",
@@ -108,7 +178,8 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
             <div className="mono mb-1">UPLOAD CUSTOMER CSV → ROUTING SHEET</div>
             <div className="serif-italic text-ink/65 text-sm">
               Expected columns: <span className="mono">city, state</span> (plus
-              anything else). Stays in browser — never uploaded.
+              anything else). Saved as the SF master — used here and on the ◯ SF
+              World globe. Stays until you upload a new one.
             </div>
           </label>
           <input
@@ -143,7 +214,11 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
           artistName={artistName}
           radiusMiles={radiusMiles}
           setRadiusMiles={setRadiusMiles}
-          onReset={() => setStage({ kind: "idle" })}
+          usingMaster={usingMaster}
+          onReset={() => {
+            setUsingMaster(false);
+            setStage({ kind: "idle" });
+          }}
         />
       )}
     </div>
@@ -190,6 +265,7 @@ function RoutingSheet({
   artistName,
   radiusMiles,
   setRadiusMiles,
+  usingMaster,
   onReset,
 }: {
   loaded: Loaded;
@@ -197,6 +273,7 @@ function RoutingSheet({
   artistName: string;
   radiusMiles: number;
   setRadiusMiles: (n: number) => void;
+  usingMaster: boolean;
   onReset: () => void;
 }) {
   const [selectedLeg, setSelectedLeg] = useState<number | null>(null);
@@ -206,6 +283,20 @@ function RoutingSheet({
   // stays responsive — the thumb + labels track the live value, the heavy
   // recompute catches up a tick later.
   const dRadius = useDeferredValue(radiusMiles);
+
+  // Routing mode — CURRENT (gap-fill booked dates, today's behavior) vs
+  // TOUR HERE (Jesse's "tour where the fans are" — propose a from-scratch run
+  // through the densest untapped markets). Peer modes; defaults to CURRENT.
+  const [mode, setMode] = useState<"current" | "tourhere">("current");
+  // TOUR HERE inputs
+  const [thCount, setThCount] = useState(8);
+  const [thStart, setThStart] = useState(() =>
+    new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10),
+  );
+  const [thSpacing, setThSpacing] = useState(4);
+  const [thStyle, setThStyle] = useState<RoutingStyle>("geographic");
+  // The proposed future tour the user is reviewing (before APPLY ALL).
+  const [thProposal, setThProposal] = useState<ArtistEvent[]>([]);
 
   // Provisional what-if stops are appended to the event list; crossover
   // re-geocodes + re-sorts by date, so they slot into the spine + redraw the
@@ -289,6 +380,99 @@ function RoutingSheet({
   };
   const resetRevised = () => setProvisional([]);
 
+  // TOUR HERE handlers — propose against the BASELINE untapped pool so it's
+  // independent of any provisional stops the user has already accepted.
+  const proposeTourHere = () => {
+    const proposal = proposeFutureTour({
+      count: thCount,
+      startDate: thStart,
+      spacingDays: thSpacing,
+      style: thStyle,
+      untapped: baseline.untappedMarkets,
+    });
+    setThProposal(proposal);
+  };
+  // TOUR HERE preview crossover — runs the engine against just the proposal
+  // so the preview block can show per-stop fan counts without committing the
+  // proposal into provisional yet. Memoized on (customers, thProposal, radius).
+  const thPreview: CustomerCrossover | null = useMemo(() => {
+    if (thProposal.length === 0) return null;
+    return crossover(loaded.customers, thProposal, {
+      radiusMiles: dRadius,
+      geocode: loaded.geocode,
+    });
+  }, [loaded, thProposal, dRadius]);
+
+  // APPLY ALL merges (matching applyAgentStops) so any manual ⊕ stops the
+  // user already accepted survive. Dedupes by date|city. Clears the preview
+  // after apply so the spine takes over — re-PROPOSE to compare.
+  const applyTourHere = () => {
+    if (thProposal.length === 0) return;
+    setSelectedLeg(null);
+    setProvisional((prev) => {
+      const seen = new Set(prev.map((p) => `${p.date}|${p.city}`));
+      const additions = thProposal.filter(
+        (p) => !seen.has(`${p.date}|${p.city}`),
+      );
+      return [...prev, ...additions];
+    });
+    setThProposal([]);
+    // Land the user on the committed view — the proposal is now interleaved
+    // with the booked tour in the spine, which is CURRENT-mode territory.
+    setMode("current");
+  };
+
+  // EXPORT MAILING LIST — flatten thPreview's per-stop "nearby" customers
+  // (names already grouped by city by the engine) into one CSV row per fan,
+  // then trigger a Blob download. No server round-trip. Empty-state guarded.
+  const exportMailingList = () => {
+    if (!thPreview || thProposal.length === 0) return;
+    const rows: string[][] = [
+      [
+        "fan_name",
+        "fan_city",
+        "fan_state",
+        "stop_city",
+        "stop_state",
+        "stop_date",
+        "within_miles",
+      ],
+    ];
+    thPreview.perEvent.forEach((pe) => {
+      const stopCity = pe.event.city;
+      const stopState = pe.event.state || pe.stateCode || "";
+      const stopDate = pe.event.date;
+      pe.nearby.forEach((n) => {
+        n.names.forEach((name) => {
+          rows.push([
+            name,
+            n.city,
+            n.stateCode,
+            stopCity,
+            stopState,
+            stopDate,
+            String(dRadius),
+          ]);
+        });
+      });
+    });
+    // RFC 4180-ish CSV escape: wrap any field with a comma, quote, or newline
+    // in double quotes and double any internal quotes. Headers always safe.
+    const esc = (s: string) =>
+      /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    const csv = rows.map((r) => r.map(esc).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${artistName.replace(/\W+/g, "-").toLowerCase()}-tour-here-mailing-list.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  const resetTourHere = () => setThProposal([]);
+
   // Apply the agent's proposed stops. Validates each against the bundled
   // lat/lng (a city we can't place would silently vanish from the map and
   // dilute reach), MERGES into the existing provisional set (so manual ⊕
@@ -356,9 +540,18 @@ function RoutingSheet({
           {artistName.toUpperCase()} — ROUTING SHEET
         </span>
         <span className="text-ink/40">{loaded.fileName}</span>
+        {usingMaster && (
+          <span
+            className="text-lime"
+            title="Hydrated from the SF master dataset. Replace to upload a new master."
+          >
+            ● SF MASTER
+          </span>
+        )}
         <button
           onClick={onReset}
           className="mono text-ink/50 underline ml-auto hover:text-red"
+          title="Upload a different CSV — replaces the SF master"
         >
           REPLACE
         </button>
@@ -387,58 +580,279 @@ function RoutingSheet({
         </span>
       </div>
 
-      {/* Revised-tour builder — auto-fill every gap to maximize customers */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        {!revisedActive ? (
-          <>
-            <button
-              onClick={buildRevised}
-              className="mono px-3 h-9 bg-blue text-cream hover:bg-ink transition-colors"
-            >
-              BUILD REVISED TOUR →
-            </button>
-            <span className="serif-italic text-ink/55 text-sm">
-              Auto-fills every gap with the best customer cities on-route at{" "}
-              {radiusMiles}mi — keeps your anchored dates, adds stops between
-              them.
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="mono text-blue">
-              REVISED ✓ +{provisional.length} STOP
-              {provisional.length === 1 ? "" : "S"}
-            </span>
-            <span className="mono text-ink/70">
-              REACH {Math.round(baseline.reachPct * 100)}% →{" "}
-              <span className="text-red">
-                {Math.round(result.reachPct * 100)}%
-              </span>
-              {reachDeltaPts > 0 && (
-                <span className="text-ink/45"> (+{reachDeltaPts}pts)</span>
-              )}
-            </span>
-            {addedMiles > 0 && (
-              <span className="mono text-ink/45">
-                +{addedMiles.toLocaleString()} MI
-              </span>
-            )}
-            <button
-              onClick={buildRevised}
-              className="mono text-ink/50 underline hover:text-ink"
-              title="Recompute at the current radius"
-            >
-              REBUILD @ {radiusMiles}MI
-            </button>
-            <button
-              onClick={resetRevised}
-              className="mono text-ink/50 underline hover:text-red"
-            >
-              RESET
-            </button>
-          </>
-        )}
+      {/* Sticky mode toggle — peer modes: keep the booked dates (CURRENT)
+          vs propose a from-scratch fan-first run (TOUR HERE). Per the redesign
+          this lives just above the routing controls so flipping never loses
+          scroll position. role=radiogroup so screen readers announce the
+          mode set; arrow keys would be a future polish. */}
+      <div
+        className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-cream/95 backdrop-blur border-b border-ink/15 mb-3 flex items-center gap-3"
+        role="radiogroup"
+        aria-label="Routing mode"
+      >
+        <span className="mono text-ink/45 text-xs hidden sm:inline">
+          ROUTING
+        </span>
+        <div className="flex border border-ink/25 mono text-xs">
+          <button
+            role="radio"
+            aria-checked={mode === "current"}
+            onClick={() => setMode("current")}
+            className={`px-3 h-8 transition-colors ${
+              mode === "current"
+                ? "bg-ink text-cream"
+                : "text-ink/55 hover:text-ink"
+            }`}
+            title="Fill gaps between his booked dates"
+          >
+            ● CURRENT TOUR
+          </button>
+          <button
+            role="radio"
+            aria-checked={mode === "tourhere"}
+            onClick={() => setMode("tourhere")}
+            className={`px-3 h-8 border-l border-ink/25 transition-colors ${
+              mode === "tourhere"
+                ? "bg-ink text-cream"
+                : "text-ink/55 hover:text-ink"
+            }`}
+            title="Propose a from-scratch tour through his fanbase"
+          >
+            ✦ TOUR HERE
+          </button>
+        </div>
+        <span className="serif-italic text-ink/55 text-xs hidden md:inline">
+          {mode === "current"
+            ? "Fill the gaps in his booked run."
+            : "Build a future tour from his fanbase, from scratch."}
+        </span>
       </div>
+
+      {/* TOUR HERE controls — only render in tourhere mode. Inputs are dense,
+          mono labels, on-system. Propose stays disabled when there's no
+          untapped pool to draw from. */}
+      {mode === "tourhere" && (
+        <div className="mb-4 border border-ink/15 bg-ink/[0.02] p-3 flex flex-wrap items-end gap-x-4 gap-y-3 text-sm">
+          <label className="flex flex-col gap-1">
+            <span className="mono text-ink/50 text-xs">HOW MANY SHOWS</span>
+            <input
+              type="number"
+              min={2}
+              max={40}
+              value={thCount}
+              onChange={(e) =>
+                setThCount(
+                  Math.max(2, Math.min(40, parseInt(e.target.value, 10) || 8)),
+                )
+              }
+              className="mono w-20 border border-ink/25 bg-cream px-2 h-9 focus:outline-none focus:border-ink"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="mono text-ink/50 text-xs">STARTING</span>
+            <input
+              type="date"
+              value={thStart}
+              onChange={(e) => setThStart(e.target.value)}
+              className="mono border border-ink/25 bg-cream px-2 h-9 focus:outline-none focus:border-ink"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="mono text-ink/50 text-xs">SPACING (DAYS)</span>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={thSpacing}
+              onChange={(e) =>
+                setThSpacing(
+                  Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 4)),
+                )
+              }
+              className="mono w-20 border border-ink/25 bg-cream px-2 h-9 focus:outline-none focus:border-ink"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="mono text-ink/50 text-xs">ROUTING STYLE</span>
+            <div className="flex border border-ink/25 mono text-xs">
+              {(
+                [
+                  ["geographic", "GEO CHAIN"],
+                  ["density", "DENSITY"],
+                  ["corridor", "CORRIDOR"],
+                ] as const
+              ).map(([k, label], i) => (
+                <button
+                  key={k}
+                  onClick={() => setThStyle(k)}
+                  className={`px-2.5 h-9 ${i > 0 ? "border-l border-ink/25" : ""} transition-colors ${
+                    thStyle === k
+                      ? "bg-ink text-cream"
+                      : "text-ink/60 hover:text-ink"
+                  }`}
+                  title={
+                    k === "geographic"
+                      ? "Greedy nearest-neighbor — drivable, agent-style"
+                      : k === "density"
+                        ? "Top by fan count, ignore distance — fly anchors"
+                        : "One geographic axis (Southeast, West Coast, …)"
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </label>
+          <button
+            onClick={proposeTourHere}
+            disabled={baseline.untappedMarkets.length === 0}
+            className="mono px-3 h-9 bg-blue text-cream hover:bg-ink transition-colors disabled:opacity-30"
+          >
+            {thProposal.length > 0 ? "RE-PROPOSE" : "PROPOSE TOUR"} →
+          </button>
+          {thProposal.length > 0 && (
+            <>
+              <button
+                onClick={applyTourHere}
+                className="mono px-3 h-9 bg-red text-cream hover:bg-ink transition-colors"
+                title="Drop these stops into the spine as additive tour dates"
+              >
+                ⊕ APPLY ALL {thProposal.length}
+              </button>
+              <button
+                onClick={exportMailingList}
+                className="mono px-3 h-9 border border-ink text-ink hover:bg-ink hover:text-cream transition-colors"
+                title="Download a CSV of every fan within radius of these stops"
+              >
+                ⇣ EXPORT MAILING LIST
+              </button>
+              <button
+                onClick={resetTourHere}
+                className="mono text-ink/50 underline hover:text-red"
+              >
+                CLEAR
+              </button>
+            </>
+          )}
+          {baseline.untappedMarkets.length === 0 && (
+            <span className="serif-italic text-ink/55 text-xs">
+              No untapped markets in the customer file — every dense city is
+              already within range of a booked stop. (Try a wider radius.)
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* TOUR HERE preview — chronological list of the proposed stops with
+          fan counts pulled from a one-shot crossover against just the
+          proposal. Sits above the spine so the user reviews before APPLY.
+          Mono row format mirrors the spine's visual rhythm; this is a
+          preview, not a final selectable list, so no per-row controls. */}
+      {mode === "tourhere" && thProposal.length > 0 && thPreview && (
+        <div className="mb-4 border border-blue/40 bg-blue/[0.04]">
+          <div className="px-3 py-2 border-b border-blue/30 flex items-baseline gap-3 mono text-xs">
+            <span className="text-blue">
+              PROPOSED · {thProposal.length} STOPS
+            </span>
+            <span className="text-ink/60">
+              {thPreview.reachedCustomers.toLocaleString()} FANS REACHED
+            </span>
+            <span className="text-ink/45">
+              ({Math.round(thPreview.reachPct * 100)}% OF FILE @ {dRadius}MI)
+            </span>
+            <span className="text-ink/45 ml-auto serif-italic">
+              Review then APPLY ALL to commit to the spine.
+            </span>
+          </div>
+          <ol className="divide-y divide-blue/15">
+            {[...thPreview.perEvent]
+              .sort((a, b) =>
+                a.event.date < b.event.date
+                  ? -1
+                  : a.event.date > b.event.date
+                    ? 1
+                    : 0,
+              )
+              .map((pe, i) => (
+                <li
+                  key={`${pe.event.date}-${pe.event.city}`}
+                  className="px-3 py-2 flex items-baseline gap-3 text-sm"
+                >
+                  <span className="mono text-ink/40 w-6 tabular-nums">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="mono text-ink/70 w-24">
+                    {fmtDay(pe.event.date)}
+                  </span>
+                  <span className="font-medium">
+                    {pe.event.city}
+                    <span className="text-ink/45">
+                      , {pe.event.state || pe.stateCode || "??"}
+                    </span>
+                  </span>
+                  <span className="mono text-blue ml-auto tabular-nums">
+                    {pe.withinRadiusCount.toLocaleString()} FANS
+                  </span>
+                </li>
+              ))}
+          </ol>
+        </div>
+      )}
+
+      {/* CURRENT-MODE revised-tour bar — only render in current mode. */}
+      {mode === "current" && (
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          {!revisedActive ? (
+            <>
+              <button
+                onClick={buildRevised}
+                className="mono px-3 h-9 bg-blue text-cream hover:bg-ink transition-colors"
+              >
+                BUILD REVISED TOUR →
+              </button>
+              <span className="serif-italic text-ink/55 text-sm">
+                Auto-fills every gap with the best customer cities on-route at{" "}
+                {radiusMiles}mi — keeps your anchored dates, adds stops between
+                them.
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="mono text-blue">
+                REVISED ✓ +{provisional.length} STOP
+                {provisional.length === 1 ? "" : "S"}
+              </span>
+              <span className="mono text-ink/70">
+                REACH {Math.round(baseline.reachPct * 100)}% →{" "}
+                <span className="text-red">
+                  {Math.round(result.reachPct * 100)}%
+                </span>
+                {reachDeltaPts > 0 && (
+                  <span className="text-ink/45"> (+{reachDeltaPts}pts)</span>
+                )}
+              </span>
+              {addedMiles > 0 && (
+                <span className="mono text-ink/45">
+                  +{addedMiles.toLocaleString()} MI
+                </span>
+              )}
+              <button
+                onClick={buildRevised}
+                className="mono text-ink/50 underline hover:text-ink"
+                title="Recompute at the current radius"
+              >
+                REBUILD @ {radiusMiles}MI
+              </button>
+              <button
+                onClick={resetRevised}
+                className="mono text-ink/50 underline hover:text-red"
+              >
+                RESET
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
         {/* THE SPINE */}
@@ -607,7 +1021,13 @@ function ShowRow({
         <div className="min-w-0 flex-1">
           <div className="font-medium truncate">
             {show.event.venue === "PROVISIONAL" ? (
-              <span className="text-blue mono">PROVISIONAL</span>
+              // Sequence index keeps the ordinal context that "PROVISIONAL"
+              // (now ADDITIVE) buried in the spine. Blue, mono, prefixed with
+              // the run-order ordinal so a glance reads "this is stop 04 and
+              // it's one I added on top of the booked dates."
+              <span className="text-blue mono">
+                ADDITIVE TOUR DATE · #{String(index + 1).padStart(2, "0")}
+              </span>
             ) : (
               show.event.venue || "Venue TBD"
             )}
@@ -623,7 +1043,7 @@ function ShowRow({
               onRemove();
             }}
             className="mono text-ink/40 hover:text-red shrink-0"
-            title="Remove provisional stop"
+            title="Remove this additive date"
           >
             ✕
           </button>
@@ -639,6 +1059,16 @@ function ShowRow({
         />
         {show.sameCityCount > 0 && (
           <span className="text-red">★ {show.sameCityCount} IN CITY</span>
+        )}
+        {/* NEARBY = within the radius but NOT same-city. Surfaces the
+            customers a venue could still reach via a regional fan base
+            (drive-in, suburb spillover) even when the venue's literal city
+            is fan-light. Renders only when there's a meaningful delta. */}
+        {useRadius && show.withinRadiusCount - show.sameCityCount > 0 && (
+          <span className="text-blue">
+            ◌ {(show.withinRadiusCount - show.sameCityCount).toLocaleString()}{" "}
+            NEARBY
+          </span>
         )}
         {offFanbase && <span className="text-ink/40">⚑ OFF FANBASE</span>}
         {hasWho && (
@@ -785,7 +1215,7 @@ function LegConnector({
                   className={`mono shrink-0 ${
                     accepted ? "text-ink/30" : "text-blue hover:text-red"
                   }`}
-                  title={accepted ? "Added" : "Add as provisional stop"}
+                  title={accepted ? "Added" : "Add as additive tour date"}
                 >
                   {accepted ? "✓" : "⊕"}
                 </button>

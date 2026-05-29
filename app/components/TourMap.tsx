@@ -1,9 +1,45 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet.heat";
 import "leaflet/dist/leaflet.css";
+
+// Tile-style toggle: four free, no-token providers covering the spectrum
+// from "data viz clean" to "what's actually on the ground." Voyager is the
+// new default — more roads, terrain hints, and place labels than Positron,
+// which felt washed-out as a working map.
+type TileStyle = "voyager" | "positron" | "terrain" | "dark";
+const TILES: Record<
+  TileStyle,
+  { url: string; attribution: string; subdomains: string; label: string }
+> = {
+  voyager: {
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution: "© OpenStreetMap · © CARTO",
+    subdomains: "abcd",
+    label: "VOYAGER",
+  },
+  positron: {
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution: "© OpenStreetMap · © CARTO",
+    subdomains: "abcd",
+    label: "CLEAN",
+  },
+  terrain: {
+    url: "https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.png",
+    attribution:
+      "© Stadia Maps · © Stamen Design · © OpenMapTiles · © OpenStreetMap",
+    subdomains: "",
+    label: "TERRAIN",
+  },
+  dark: {
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attribution: "© OpenStreetMap · © CARTO",
+    subdomains: "abcd",
+    label: "DARK",
+  },
+};
 
 // leaflet.heat augments L at runtime but ships no types. Narrow cast.
 type HeatLatLng = [number, number, number];
@@ -81,8 +117,11 @@ export default function TourMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const overlayRef = useRef<L.LayerGroup | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const [tileStyle, setTileStyle] = useState<TileStyle>("voyager");
 
-  // Init once.
+  // Init once. Tile layer initialised with the default style; subsequent
+  // style changes swap it in a separate effect (cheaper than re-init).
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, {
@@ -90,22 +129,39 @@ export default function TourMap({
       zoomControl: true,
       attributionControl: true,
     }).setView([39.5, -98.35], 4);
-    L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-      {
-        attribution: "© OpenStreetMap · © CARTO",
-        subdomains: "abcd",
-        maxZoom: 19,
-      },
-    ).addTo(map);
+    const def = TILES.voyager;
+    tileLayerRef.current = L.tileLayer(def.url, {
+      attribution: def.attribution,
+      subdomains: def.subdomains,
+      maxZoom: 19,
+    }).addTo(map);
     overlayRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     return () => {
       map.remove();
       mapRef.current = null;
       overlayRef.current = null;
+      tileLayerRef.current = null;
     };
   }, []);
+
+  // Swap tile layer when the user toggles style. Leaflet's TileLayer.setUrl
+  // would work for same-provider switches, but subdomains differ across our
+  // four options (CARTO {a,b,c,d} vs Stadia {""}), so a fresh layer is
+  // simpler and avoids quirks where the old subdomain list lingers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current);
+    }
+    const cfg = TILES[tileStyle];
+    tileLayerRef.current = L.tileLayer(cfg.url, {
+      attribution: cfg.attribution,
+      subdomains: cfg.subdomains,
+      maxZoom: 19,
+    }).addTo(map);
+  }, [tileStyle]);
 
   // Redraw overlays on data / radius / selection change.
   useEffect(() => {
@@ -176,7 +232,7 @@ export default function TourMap({
         icon: stopIcon(prov ? "+" : String(i + 1), prov, selected),
       }).bindPopup(
         `<strong>${s.venue}</strong><br>${s.city} · ${s.date}${
-          prov ? "<br><em>provisional</em>" : ""
+          prov ? "<br><em>additive</em>" : ""
         }`,
       );
       if (onSelectStop) marker.on("click", () => onSelectStop(i));
@@ -262,10 +318,38 @@ export default function TourMap({
   }, [selectedLeg, routeKey]);
 
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-[380px] md:h-[460px] border border-ink/15"
-      style={{ background: CREAM }}
-    />
+    <div className="relative w-full h-[380px] md:h-[460px]">
+      <div
+        ref={containerRef}
+        className="w-full h-full border border-ink/15"
+        style={{ background: CREAM }}
+      />
+      {/* Tile-style toggle — absolute-positioned overlay so the map fills its
+          container and the chooser sits over it without reflowing. Mono caps
+          + ink/cream chips match the panel's typographic register. */}
+      <div
+        className="absolute top-2 right-2 flex border border-ink/40 bg-cream/95 backdrop-blur mono text-[10px] z-[1000]"
+        role="radiogroup"
+        aria-label="Map tile style"
+      >
+        {(Object.keys(TILES) as TileStyle[]).map((k, i) => (
+          <button
+            key={k}
+            role="radio"
+            aria-checked={tileStyle === k}
+            onClick={() => setTileStyle(k)}
+            className={`px-2 h-7 transition-colors ${
+              i > 0 ? "border-l border-ink/25" : ""
+            } ${
+              tileStyle === k
+                ? "bg-ink text-cream"
+                : "text-ink/60 hover:text-ink"
+            }`}
+          >
+            {TILES[k].label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
