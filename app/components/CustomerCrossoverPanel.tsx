@@ -14,6 +14,8 @@ import {
   type RoutingSuggestion,
 } from "@/lib/customerCrossover";
 import type { Event as ArtistEvent } from "@/lib/types";
+import { TourChat } from "./TourChat";
+import { buildTourContext, type ProposedStop } from "@/lib/tourChat";
 
 const TourMap = dynamic(() => import("./TourMap"), {
   ssr: false,
@@ -278,6 +280,23 @@ function RoutingSheet({
     setProvisional(buildRevisedTour(baseline));
   };
   const resetRevised = () => setProvisional([]);
+
+  // The agent's proposed stops replace the current provisional set, so the
+  // spine/map/reach update through the same pipeline as ⊕ and BUILD.
+  const applyAgentStops = (stops: ProposedStop[]) => {
+    setSelectedLeg(null);
+    setProvisional(
+      stops.map(
+        (s) =>
+          ({
+            date: s.date,
+            city: s.city,
+            state: s.state,
+            venue: "PROVISIONAL",
+          }) as ArtistEvent,
+      ),
+    );
+  };
   // Diff the DISPLAYED (rounded) percentages so "14% → 17%" reads as "+3pts",
   // never a rounding-artifact "+2pts".
   const reachDeltaPts =
@@ -501,6 +520,12 @@ function RoutingSheet({
         result={result}
         planOpen={planOpen}
         setPlanOpen={setPlanOpen}
+      />
+
+      {/* Conversational tour agent — give context, it revises the run */}
+      <TourChat
+        context={buildTourContext(result, artistName, radiusMiles)}
+        onApplyStops={applyAgentStops}
       />
 
       <div className="mt-4 serif-italic text-ink/45 text-xs">
