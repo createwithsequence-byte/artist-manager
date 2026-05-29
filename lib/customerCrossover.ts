@@ -593,3 +593,51 @@ function extractCustomer(row: Record<string, string>): Customer {
 export function parseCustomers(rows: Record<string, string>[]): Customer[] {
   return rows.map(extractCustomer).filter((c) => c.state || c.city);
 }
+
+/** A date `frac` of the way from `from` to `to` (both YYYY-MM-DD). */
+function dateAtFraction(from: string, to: string, frac: number): string {
+  const a = new Date(from).getTime();
+  const b = new Date(to).getTime();
+  if (Number.isNaN(a) || Number.isNaN(b)) return from;
+  return new Date(a + (b - a) * frac).toISOString().slice(0, 10);
+}
+
+/**
+ * Build a "revised tour": given a BASELINE crossover (anchored dates only),
+ * auto-fill every bookable gap with the best customer-maximizing on-route
+ * cities, spacing their suggested dates across the idle window. Returns
+ * provisional stops to insert; caller re-runs crossover on [anchors, ...these].
+ *
+ * Pass the baseline (anchors-only) result — NOT a result that already has
+ * provisional stops, or the legs will have rerouted through them.
+ *
+ * Stops per gap scale with its length (≈1 per 10 idle days, capped at 3) and
+ * are the engine's already-ranked, on-route, deduped suggestions — so the
+ * revised tour honors the current mileage/radius setting automatically.
+ */
+export function buildRevisedTour(baseline: CustomerCrossover): ArtistEvent[] {
+  const out: ArtistEvent[] = [];
+  const usedKeys = new Set<string>();
+  for (const leg of baseline.legs) {
+    if (leg.suggestions.length === 0) continue;
+    const maxStops = Math.min(3, Math.max(1, Math.floor(leg.gapDays / 10)));
+    const picked: RoutingSuggestion[] = [];
+    for (const s of leg.suggestions) {
+      if (picked.length >= maxStops) break;
+      const k = `${s.city.toLowerCase()}|${s.stateCode}`;
+      if (usedKeys.has(k)) continue;
+      usedKeys.add(k);
+      picked.push(s);
+    }
+    picked.forEach((s, i) => {
+      const frac = (i + 1) / (picked.length + 1);
+      out.push({
+        date: dateAtFraction(leg.fromDate, leg.toDate, frac),
+        city: s.city,
+        state: s.stateCode,
+        venue: "PROVISIONAL",
+      } as ArtistEvent);
+    });
+  }
+  return out;
+}

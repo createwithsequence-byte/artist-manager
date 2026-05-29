@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Papa from "papaparse";
 import {
   crossover,
+  buildRevisedTour,
   parseCustomers,
   type Customer,
   type CustomerCrossover,
@@ -221,6 +222,18 @@ function RoutingSheet({
     [loaded, allEvents, radiusMiles],
   );
 
+  // Baseline = anchored dates only. Used to compute the revised tour (so fills
+  // are decided against the real dates, not a route already rerouted through
+  // earlier fills) and to show the before→after reach delta.
+  const baseline: CustomerCrossover = useMemo(
+    () =>
+      crossover(loaded.customers, events, {
+        radiusMiles,
+        geocode: loaded.geocode,
+      }),
+    [loaded, events, radiusMiles],
+  );
+
   // Build the chronological spine: shows sorted by date, with the matching
   // Leg connector slotted between consecutive shows.
   const shows = useMemo(
@@ -258,6 +271,18 @@ function RoutingSheet({
     setProvisional((prev) =>
       prev.filter((p) => !(p.date === date && p.city === city)),
     );
+
+  const revisedActive = provisional.length > 0;
+  const buildRevised = () => {
+    setSelectedLeg(null);
+    setProvisional(buildRevisedTour(baseline));
+  };
+  const resetRevised = () => setProvisional([]);
+  const reachDeltaPts = Math.round((result.reachPct - baseline.reachPct) * 100);
+  const addedMiles = Math.max(
+    0,
+    result.totalRouteMiles - baseline.totalRouteMiles,
+  );
 
   const coverageBlocks = Math.round(result.reachPct * 5);
   const dateRange =
@@ -313,6 +338,59 @@ function RoutingSheet({
           {Math.round(result.reachPct * 100)}%
           {result.reachPct < 0.15 && <span className="text-red ml-1">⚑</span>}
         </span>
+      </div>
+
+      {/* Revised-tour builder — auto-fill every gap to maximize customers */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        {!revisedActive ? (
+          <>
+            <button
+              onClick={buildRevised}
+              className="mono px-3 h-9 bg-blue text-cream hover:bg-ink transition-colors"
+            >
+              BUILD REVISED TOUR →
+            </button>
+            <span className="serif-italic text-ink/55 text-sm">
+              Auto-fills every gap with the best customer cities on-route at{" "}
+              {radiusMiles}mi — keeps your anchored dates, adds stops between
+              them.
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="mono text-blue">
+              REVISED ✓ +{provisional.length} STOP
+              {provisional.length === 1 ? "" : "S"}
+            </span>
+            <span className="mono text-ink/70">
+              REACH {Math.round(baseline.reachPct * 100)}% →{" "}
+              <span className="text-red">
+                {Math.round(result.reachPct * 100)}%
+              </span>
+              {reachDeltaPts > 0 && (
+                <span className="text-ink/45"> (+{reachDeltaPts}pts)</span>
+              )}
+            </span>
+            {addedMiles > 0 && (
+              <span className="mono text-ink/45">
+                +{addedMiles.toLocaleString()} MI
+              </span>
+            )}
+            <button
+              onClick={buildRevised}
+              className="mono text-ink/50 underline hover:text-ink"
+              title="Recompute at the current radius"
+            >
+              REBUILD @ {radiusMiles}MI
+            </button>
+            <button
+              onClick={resetRevised}
+              className="mono text-ink/50 underline hover:text-red"
+            >
+              RESET
+            </button>
+          </>
+        )}
       </div>
 
       <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
