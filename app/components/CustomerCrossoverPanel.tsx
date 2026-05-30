@@ -1130,13 +1130,13 @@ function ShowRow({
             {show.stateCode ? `, ${show.stateCode}` : ""}
             {hasWho && (
               <button
-                className={`rs-who${whoOpen ? " on" : ""}`}
+                className="rs-who"
                 onClick={(e) => {
                   e.stopPropagation();
                   setWhoOpen((v) => !v);
                 }}
               >
-                {whoOpen ? "▾ who" : "▸ who"}
+                {whoOpen ? "▾ Fans" : "▸ Fans"}
               </button>
             )}
             {onRemove && (

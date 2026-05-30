@@ -493,8 +493,8 @@ body {
   margin-top: 2px;
 }
 .rsheet .rs-who {
-  margin-left: 9px;
-  color: var(--rs-ink-4);
+  margin-left: 10px;
+  color: var(--rs-blue);
   cursor: pointer;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -502,12 +502,7 @@ body {
   text-transform: uppercase;
   background: transparent;
   border: 0;
-  opacity: 0;
-  transition: opacity 0.12s;
-}
-.rsheet .rs-stop:hover .rs-who,
-.rsheet .rs-who.on {
-  opacity: 1;
+  padding: 0;
 }
 .rsheet .rs-who:hover {
   color: var(--rs-ink);

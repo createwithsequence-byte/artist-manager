@@ -252,9 +252,12 @@ export default function CustomersPage() {
   }, [stage]);
 
   return (
-    <div className="min-h-screen flex flex-col">
+    // h-dvh (not min-h-screen) bounds the column so the globe's flex-1 fills
+    // exactly the leftover viewport — no dead band. bg-white per the SF World
+    // brief (cream is the workbench; the worlds read cleaner on white).
+    <div className="h-dvh flex flex-col bg-white overflow-hidden">
       {/* Top bar — minimal, mirrors the home toolbar's compact rhythm. */}
-      <header className="flex items-center gap-4 px-5 py-3 border-b border-ink/15">
+      <header className="flex items-center gap-4 px-5 py-3 border-b border-ink/15 bg-white">
         <Link
           href="/"
           className="display text-2xl hover:text-red transition-colors"
@@ -492,8 +495,8 @@ export default function CustomersPage() {
               the other to keep memory clean (three.js scenes don't free on
               their own). Globe gets full bleed (dark bg), flat gets a border.
               flex-1 + min-h-0 lets the globe fill the viewport instead of
-              floating in a fixed box with dead cream space below. */}
-          <div className="flex-1 min-h-[68vh] flex flex-col">
+              floating in a fixed box with dead space below. */}
+          <div className="flex-1 min-h-0 flex flex-col">
             {view === "globe" ? (
               <CustomerGlobe
                 aggregate={stage.aggregate}
