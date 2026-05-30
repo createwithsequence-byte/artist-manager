@@ -62,6 +62,11 @@ export default function CustomersPage() {
   const [datasetId, setDatasetId] = useState("master");
   const [isArtistWorld, setIsArtistWorld] = useState(false);
   const [persistedAt, setPersistedAt] = useState<string | null>(null);
+  // Adopt-master offer for an empty artist world (mirror of the routing panel).
+  const [masterOffer, setMasterOffer] = useState<{ count: number } | null>(
+    null,
+  );
+  const [adopting, setAdopting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // On mount: read ?artist + ?name from the URL (window.location avoids the
@@ -93,6 +98,19 @@ export default function CustomersPage() {
           // the stored name when no name was passed (e.g. the global master).
           if (!name) setDatasetName(d.dataset.name);
           setPersistedAt(d.dataset.updatedAt);
+        } else if (artist) {
+          // Empty artist world — offer to adopt the legacy master if present.
+          fetch("/api/customers")
+            .then((r) => r.json())
+            .then((list) => {
+              const master = Array.isArray(list?.datasets)
+                ? list.datasets.find((x: { id: string }) => x.id === "master")
+                : null;
+              if (master && master.customerCount > 0) {
+                setMasterOffer({ count: master.customerCount });
+              }
+            })
+            .catch(() => {});
         }
       })
       .catch((err) =>
@@ -182,6 +200,46 @@ export default function CustomersPage() {
   const replaceDataset = () => {
     setStage({ kind: "idle" });
     if (fileInput.current) fileInput.current.value = "";
+  };
+
+  // Adopt the legacy master as this artist's world (server-side copy), then
+  // hydrate the now-populated dataset. Mirror of the routing panel's adopt.
+  const adoptMaster = () => {
+    setAdopting(true);
+    fetch("/api/customers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        copyFrom: "master",
+        id: datasetId,
+        name: datasetName,
+      }),
+    })
+      .then((r) => r.json())
+      .then(async (d) => {
+        if (!d?.ok) throw new Error(d?.error || "adopt failed");
+        const hd = await fetch(
+          `/api/customers?id=${encodeURIComponent(datasetId)}`,
+        ).then((r) => r.json());
+        if (hd?.dataset?.aggregate?.length) {
+          setStage({
+            kind: "ready",
+            aggregate: hd.dataset.aggregate,
+            customerCount: hd.dataset.customerCount,
+            dropped: 0,
+            sourceLabel: `★ ${hd.dataset.name} · saved ${new Date(hd.dataset.updatedAt).toISOString().slice(0, 10)}`,
+          });
+          setPersistedAt(hd.dataset.updatedAt);
+          setMasterOffer(null);
+        }
+      })
+      .catch((err) =>
+        console.warn(
+          "[CUSTOMERS] adopt failed:",
+          err instanceof Error ? err.message : String(err),
+        ),
+      )
+      .finally(() => setAdopting(false));
   };
 
   const headerStats = useMemo(() => {
@@ -302,6 +360,24 @@ export default function CustomersPage() {
                 if (f) handleFile(f);
               }}
             />
+            {/* Adopt-master offer — empty artist world + a legacy master. */}
+            {masterOffer && (
+              <button
+                onClick={adoptMaster}
+                disabled={adopting}
+                className="mt-5 w-full text-left flex items-center gap-3 border border-blue/40 bg-blue/[0.04] px-5 py-4 hover:bg-blue/[0.08] transition-colors disabled:opacity-50"
+              >
+                <span className="mono text-blue shrink-0">◎ ADOPT</span>
+                <span className="serif-italic text-ink/70 flex-1">
+                  {adopting
+                    ? `Adopting ${masterOffer.count.toLocaleString()} customers as ${datasetName}'s…`
+                    : `Existing master has ${masterOffer.count.toLocaleString()} customers — claim them as ${datasetName}'s world (no re-upload).`}
+                </span>
+                {!adopting && (
+                  <span className="mono text-blue shrink-0">→</span>
+                )}
+              </button>
+            )}
           </div>
         </section>
       )}

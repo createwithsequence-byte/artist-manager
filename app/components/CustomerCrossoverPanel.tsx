@@ -56,14 +56,23 @@ export function CustomerCrossoverPanel({
   // master dataset (vs uploaded locally this session). Drives the "USING
   // MASTER" badge in the panel header so the source of truth is visible.
   const [usingMaster, setUsingMaster] = useState(false);
+  // When this artist has no saved dataset yet but the legacy global "master"
+  // exists, offer a one-click adopt (copy master → this artist) so the 4k
+  // already in Turso isn't lost to a re-upload. null = no offer.
+  const [masterOffer, setMasterOffer] = useState<{ count: number } | null>(
+    null,
+  );
+  const [adopting, setAdopting] = useState(false);
   const inputId = `crossover-csv-${artistName.replace(/\W+/g, "-")}`;
   const fileInput = useRef<HTMLInputElement>(null);
 
   // On mount: hydrate THIS ARTIST's saved customer dataset (keyed by identity)
   // so their world + routing persist across sessions without re-upload. Stays
-  // idle if this artist has no saved data yet — the drop zone takes over.
+  // idle if this artist has no saved data yet — then offer to adopt the
+  // legacy master if one exists, else the drop zone takes over.
   useEffect(() => {
     let cancelled = false;
+    setMasterOffer(null);
     fetch(`/api/customers?id=${encodeURIComponent(customerKey)}&raw=1`)
       .then((r) => r.json())
       .then(async (d) => {
@@ -80,6 +89,17 @@ export function CustomerCrossoverPanel({
             },
           });
           setUsingMaster(true);
+        } else if (customerKey !== "master") {
+          // No saved data for this artist — see if the legacy master can be
+          // adopted (so e.g. Jesse's pre-existing 4k becomes his in one click).
+          const list = await fetch("/api/customers").then((r) => r.json());
+          if (cancelled) return;
+          const master = Array.isArray(list?.datasets)
+            ? list.datasets.find((x: { id: string }) => x.id === "master")
+            : null;
+          if (master && master.customerCount > 0) {
+            setMasterOffer({ count: master.customerCount });
+          }
         }
       })
       .catch((err) =>
@@ -92,6 +112,49 @@ export function CustomerCrossoverPanel({
       cancelled = true;
     };
   }, [customerKey]);
+
+  // Adopt the legacy master as THIS artist's dataset — server-side copy
+  // (master → customerKey), then hydrate the now-populated dataset. No
+  // re-upload, no multi-MB blob through the browser.
+  const adoptMaster = () => {
+    setAdopting(true);
+    fetch("/api/customers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        copyFrom: "master",
+        id: customerKey,
+        name: artistName,
+      }),
+    })
+      .then((r) => r.json())
+      .then(async (d) => {
+        if (!d?.ok) throw new Error(d?.error || "adopt failed");
+        const hd = await fetch(
+          `/api/customers?id=${encodeURIComponent(customerKey)}&raw=1`,
+        ).then((r) => r.json());
+        if (hd?.dataset && Array.isArray(hd?.raw) && hd.raw.length > 0) {
+          const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
+          setStage({
+            kind: "ready",
+            loaded: {
+              fileName: `★ ${hd.dataset.name}`,
+              customers: hd.raw as Customer[],
+              geocode: US_CITY_LATLNG as unknown as GeocodeMap,
+            },
+          });
+          setUsingMaster(true);
+          setMasterOffer(null);
+        }
+      })
+      .catch((err) =>
+        console.warn(
+          "[CROSSOVER] adopt failed:",
+          err instanceof Error ? err.message : String(err),
+        ),
+      )
+      .finally(() => setAdopting(false));
+  };
 
   const handleFile = (file: File) => {
     setStage({ kind: "parsing", fileName: file.name });
@@ -207,6 +270,23 @@ export function CustomerCrossoverPanel({
               if (file) handleFile(file);
             }}
           />
+          {/* Adopt-master offer — only when this artist has no data yet but a
+              legacy master exists. One click keys it to them, no re-upload. */}
+          {masterOffer && (
+            <button
+              onClick={adoptMaster}
+              disabled={adopting}
+              className="mt-3 w-full text-left flex items-center gap-3 border border-blue/40 bg-blue/[0.04] px-4 py-3 hover:bg-blue/[0.08] transition-colors disabled:opacity-50"
+            >
+              <span className="mono text-blue text-sm shrink-0">◎ ADOPT</span>
+              <span className="serif-italic text-ink/70 text-sm flex-1">
+                {adopting
+                  ? `Adopting ${masterOffer.count.toLocaleString()} customers as ${artistName}'s…`
+                  : `Existing master has ${masterOffer.count.toLocaleString()} customers — claim them as ${artistName}'s own (no re-upload).`}
+              </span>
+              {!adopting && <span className="mono text-blue shrink-0">→</span>}
+            </button>
+          )}
         </>
       )}
 

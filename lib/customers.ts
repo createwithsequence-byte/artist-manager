@@ -173,3 +173,32 @@ export async function loadCustomerDatasetRaw(
     return null;
   }
 }
+
+/**
+ * Copy one dataset (aggregate + raw rows) onto another id — used to "adopt"
+ * the legacy global master as a specific artist's own dataset without making
+ * the user re-upload. Runs entirely server-side so the multi-MB raw blob
+ * never round-trips through the browser. Preserves the source; only writes
+ * the target (named after the adopting artist).
+ */
+export async function copyCustomerDataset(
+  fromId: string,
+  toId: string,
+  name: string,
+): Promise<{ id: string; cityCount: number; rowCount: number }> {
+  const src = await loadCustomerDataset(fromId);
+  if (!src) throw new Error(`Source dataset "${fromId}" not found`);
+  const { cityCount } = await upsertCustomerDataset(
+    toId,
+    name,
+    src.aggregate,
+    src.customerCount,
+  );
+  const raw = await loadCustomerDatasetRaw(fromId);
+  let rowCount = 0;
+  if (raw && raw.length > 0) {
+    const r = await upsertCustomerDatasetRaw(toId, raw);
+    rowCount = r.rowCount;
+  }
+  return { id: toId, cityCount, rowCount };
+}

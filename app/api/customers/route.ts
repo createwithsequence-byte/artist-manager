@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { isTursoConfigured } from "@/lib/db";
 import {
+  copyCustomerDataset,
   deleteCustomerDataset,
   listCustomerDatasets,
   loadCustomerDataset,
@@ -59,17 +60,34 @@ export async function POST(req: NextRequest) {
     aggregate?: CityAggregate[];
     customerCount?: number;
     raw?: Customer[];
+    copyFrom?: string;
   };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+  const id = body.id?.trim() || "master";
+  const name = body.name?.trim() || "Songfinch Customer Master";
+
+  // Adopt branch — copy an existing dataset (e.g. the legacy "master") onto
+  // this id so an artist can claim it without re-uploading. No aggregate in
+  // the request; the server reads it from the source dataset.
+  if (body.copyFrom) {
+    try {
+      const result = await copyCustomerDataset(body.copyFrom.trim(), id, name);
+      return Response.json({ ok: true, ...result });
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
+    }
+  }
+
   if (!Array.isArray(body.aggregate)) {
     return Response.json({ error: "aggregate[] required" }, { status: 400 });
   }
-  const id = body.id?.trim() || "master";
-  const name = body.name?.trim() || "Songfinch Customer Master";
   const customerCount = Number(body.customerCount) || 0;
   try {
     const result = await upsertCustomerDataset(
