@@ -119,6 +119,9 @@ export default function TourMap({
   const overlayRef = useRef<L.LayerGroup | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const [tileStyle, setTileStyle] = useState<TileStyle>("voyager");
+  // Fan-density heat is OFF by default — the route + pins are the heroes; the
+  // heatmap is an on-demand overlay, not a permanent wash (per the redesign).
+  const [densityOn, setDensityOn] = useState(false);
 
   // Init once. Tile layer initialised with the default style; subsequent
   // style changes swap it in a separate effect (cheaper than re-init).
@@ -172,8 +175,11 @@ export default function TourMap({
     const isProvisional = (s: Stop) =>
       provisionalKeys?.has(`${s.date}|${s.city}`) ?? false;
 
-    // 1. Customer density heatmap — cold→hot blue→red ramp (on-system).
-    if (customerPoints.length > 0) {
+    // 1. Customer density heatmap — single-hue red wash (faint→solid), only
+    //    when the user opts in. The old blue→purple→red ramp at full opacity
+    //    was the eye-dying "mold" smear; one calm hue reads as a reference
+    //    layer, not a competing canvas.
+    if (densityOn && customerPoints.length > 0) {
       const maxW = Math.max(...customerPoints.map((p) => p.weight), 1);
       overlay.addLayer(
         (L as LeafletWithHeat).heatLayer(
@@ -181,10 +187,10 @@ export default function TourMap({
             (p) => [p.lat, p.lng, p.weight / maxW] as HeatLatLng,
           ),
           {
-            radius: 24,
+            radius: 22,
             blur: 20,
-            minOpacity: 0.2,
-            gradient: { 0.15: BLUE, 0.55: "#7A4FB0", 1.0: RED },
+            minOpacity: 0.12,
+            gradient: { 0.25: "#F2322255", 0.6: "#F2322299", 1.0: RED },
           },
         ),
       );
@@ -280,6 +286,7 @@ export default function TourMap({
     radiusMiles,
     selectedLeg,
     provisionalKeys,
+    densityOn,
     onSelectStop,
     onSelectLeg,
   ]);
@@ -350,6 +357,21 @@ export default function TourMap({
           </button>
         ))}
       </div>
+      {/* Fan-density overlay toggle — off by default; the route + pins lead,
+          density is an opt-in reference layer. Bottom-left so it doesn't
+          collide with the tile chooser or Leaflet's zoom control. */}
+      <button
+        onClick={() => setDensityOn((v) => !v)}
+        aria-pressed={densityOn}
+        title="Overlay fan-density heatmap"
+        className={`absolute bottom-6 right-2 flex items-center gap-1.5 px-2 h-7 border mono text-[10px] z-[1000] backdrop-blur transition-colors ${
+          densityOn
+            ? "bg-red text-cream border-red"
+            : "bg-cream/95 text-ink/60 border-ink/40 hover:text-ink"
+        }`}
+      >
+        {densityOn ? "◉" : "○"} DENSITY
+      </button>
     </div>
   );
 }

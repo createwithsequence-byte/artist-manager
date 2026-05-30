@@ -922,7 +922,7 @@ function RoutingSheet({
             <span className="lg">
               <span style={{ color: "var(--rs-blue)" }}>◇</span> Fill candidate
             </span>
-            <span className="lg">Fan density · cold→hot</span>
+            <span className="lg">Fan density · ◉ toggle on map</span>
             {selectedLeg !== null && result.legs[selectedLeg] && (
               <span className="lg" style={{ color: "var(--rs-ink-2)" }}>
                 Selected · {result.legs[selectedLeg].fromCity} →{" "}
