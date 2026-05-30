@@ -55,6 +55,11 @@ export default function CustomersPage() {
   const [dragOver, setDragOver] = useState(false);
   const [view, setView] = useState<View>("globe");
   const [globeMode, setGlobeMode] = useState<GlobeMode>("points");
+  // Stackable globe overlays — additive on top of the POINTS/HEX base.
+  const [ovRings, setOvRings] = useState(false);
+  const [ovLabels, setOvLabels] = useState(false);
+  const [ovPins, setOvPins] = useState(false);
+  const [ovHeat, setOvHeat] = useState(false);
   const [datasetName, setDatasetName] = useState("Songfinch Customer Master");
   // Dataset id — per-artist (sp:… / nm:…) when arrived at via ?artist, else
   // the global "master". Drives hydrate + persist so each artist's world is
@@ -473,6 +478,40 @@ export default function CustomersPage() {
                     ⬢ HEX
                   </button>
                 </div>
+                {/* Stackable overlays — all additive on top of the base. */}
+                <span className="mono text-ink/35 text-xs">+</span>
+                <div className="flex border border-ink/25 mono text-xs">
+                  {(
+                    [
+                      [
+                        "RINGS",
+                        ovRings,
+                        setOvRings,
+                        "Pulsing rings on top markets",
+                      ],
+                      [
+                        "LABELS",
+                        ovLabels,
+                        setOvLabels,
+                        "City names on top markets",
+                      ],
+                      ["PINS", ovPins, setOvPins, "Pin markers on top markets"],
+                      ["HEAT", ovHeat, setOvHeat, "Surface density heat glow"],
+                    ] as const
+                  ).map(([label, val, set, tip], i) => (
+                    <button
+                      key={label}
+                      onClick={() => set(!val)}
+                      title={tip}
+                      aria-pressed={val}
+                      className={`px-2.5 h-8 ${i > 0 ? "border-l border-ink/25" : ""} transition-colors ${
+                        val ? "bg-ink text-cream" : "text-ink/55 hover:text-ink"
+                      }`}
+                    >
+                      {val ? "◉" : "○"} {label}
+                    </button>
+                  ))}
+                </div>
               </>
             )}
             <span className="mono text-ink/45 text-xs ml-auto truncate">
@@ -501,6 +540,10 @@ export default function CustomersPage() {
               <CustomerGlobe
                 aggregate={stage.aggregate}
                 mode={globeMode}
+                showRings={ovRings}
+                showLabels={ovLabels}
+                showPins={ovPins}
+                showHeat={ovHeat}
                 autoRotate
               />
             ) : (

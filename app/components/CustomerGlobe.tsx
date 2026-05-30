@@ -8,14 +8,20 @@ type Props = {
   aggregate: CityAggregate[];
   /** Initial auto-rotation; toggles off on user interaction. */
   autoRotate?: boolean;
-  /** Layer mode: weighted dots vs. hex-bin clustering. Defaults to "points". */
+  /** Base representation: weighted dots vs. hex-bin clustering. */
   mode?: "points" | "hex";
+  /** Stackable overlays — all additive on top of the base mode. */
+  showRings?: boolean;
+  showLabels?: boolean;
+  showPins?: boolean;
+  showHeat?: boolean;
 };
 
 const RED = "#F23222";
 const BLUE = "#1E2DDB";
 const LIME = "#C9F33A";
 const CREAM = "#F4EFE6";
+const TOP_N = 10; // top cities that get rings / labels / pins
 
 /**
  * 3D globe of every Songfinch customer city. Renders weighted points by
@@ -35,6 +41,10 @@ export default function CustomerGlobe({
   aggregate,
   autoRotate = true,
   mode = "points",
+  showRings = false,
+  showLabels = false,
+  showPins = false,
+  showHeat = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
@@ -87,6 +97,26 @@ export default function CustomerGlobe({
       };
     });
   }, [aggregate]);
+
+  // Top cities feed the rings / labels / pins overlays — capped so they don't
+  // clutter. Each carries city + count for labels/tooltips.
+  const topCities = useMemo(
+    () =>
+      aggregate.slice(0, TOP_N).map((a) => ({
+        lat: a.lat,
+        lng: a.lng,
+        city: a.city,
+        stateCode: a.stateCode,
+        count: a.count,
+      })),
+    [aggregate],
+  );
+
+  // Heatmap wants an array OF datasets, each an array of weighted points.
+  const heatData = useMemo(
+    () => [aggregate.map((a) => ({ lat: a.lat, lng: a.lng, weight: a.count }))],
+    [aggregate],
+  );
 
   // Auto-rotate + camera setup. Runs after globe init. Listens to
   // orbit-controls "start" so the FIRST drag/zoom kills rotation.
@@ -172,6 +202,53 @@ export default function CustomerGlobe({
               ${topCity ? `<div style="color:#0A0A0A99;margin-top:2px">TOP · ${topCity.city.toUpperCase()}, ${topCity.stateCode}</div>` : ""}
             </div>`;
         }}
+        // RINGS — pulsing rings on the densest markets (top N).
+        ringsData={showRings ? topCities : []}
+        ringLat="lat"
+        ringLng="lng"
+        ringColor={() => (t: number) => `rgba(242,50,34,${1 - t})`}
+        ringMaxRadius={(d: object) => {
+          const c = (d as { count: number }).count;
+          const maxCount = aggregate[0]?.count ?? 1;
+          return 2 + Math.sqrt(c / maxCount) * 5;
+        }}
+        ringPropagationSpeed={1.4}
+        ringRepeatPeriod={1500}
+        // LABELS — city name on the top markets.
+        labelsData={showLabels ? topCities : []}
+        labelLat="lat"
+        labelLng="lng"
+        labelText={(d: object) => (d as { city: string }).city}
+        labelSize={0.5}
+        labelDotRadius={0.18}
+        labelColor={() => CREAM}
+        labelResolution={2}
+        labelAltitude={0.012}
+        // PINS — teardrop markers on the top markets (HTML elements).
+        htmlElementsData={showPins ? topCities : []}
+        htmlLat="lat"
+        htmlLng="lng"
+        htmlAltitude={0.02}
+        htmlElement={(d: object) => {
+          const c = d as { city: string; stateCode: string; count: number };
+          const el = document.createElement("div");
+          el.style.cssText =
+            "transform:translate(-50%,-100%);pointer-events:auto;cursor:pointer;";
+          el.title = `${c.city}, ${c.stateCode} · ${c.count.toLocaleString()} fans`;
+          el.innerHTML = `<svg width="16" height="22" viewBox="0 0 16 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M8 0C3.6 0 0 3.6 0 8c0 5.5 8 14 8 14s8-8.5 8-14c0-4.4-3.6-8-8-8z" fill="#F23222" stroke="#fff" stroke-width="1.2"/>
+            <circle cx="8" cy="8" r="3" fill="#fff"/>
+          </svg>`;
+          return el;
+        }}
+        // HEAT — surface density glow (single weighted dataset).
+        heatmapsData={showHeat ? heatData : []}
+        heatmapPointLat="lat"
+        heatmapPointLng="lng"
+        heatmapPointWeight="weight"
+        heatmapBandwidth={0.9}
+        heatmapTopAltitude={0.0}
+        heatmapColorSaturation={1.6}
       />
     </div>
   );
