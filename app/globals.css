@@ -182,6 +182,32 @@ body {
   color: var(--rs-red);
   border-color: var(--rs-red);
 }
+.rsheet .rs-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.rsheet .rs-worldlink {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--rs-blue);
+  text-decoration: none;
+  border: 1px solid var(--rs-blue);
+  padding: 5px 10px;
+  border-radius: 5px;
+  white-space: nowrap;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.rsheet .rs-worldlink:hover {
+  background: var(--rs-blue);
+  color: #fff;
+}
 
 /* stat ribbon */
 .rsheet .rs-ribbon {

@@ -56,13 +56,28 @@ export default function CustomersPage() {
   const [view, setView] = useState<View>("globe");
   const [globeMode, setGlobeMode] = useState<GlobeMode>("points");
   const [datasetName, setDatasetName] = useState("Songfinch Customer Master");
+  // Dataset id — per-artist (sp:… / nm:…) when arrived at via ?artist, else
+  // the global "master". Drives hydrate + persist so each artist's world is
+  // their own. isArtistWorld brands the header.
+  const [datasetId, setDatasetId] = useState("master");
+  const [isArtistWorld, setIsArtistWorld] = useState(false);
   const [persistedAt, setPersistedAt] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // On mount, try to hydrate the canonical "master" dataset from Turso.
-  // No-op if Turso isn't configured or there's no master saved yet.
+  // On mount: read ?artist + ?name from the URL (window.location avoids the
+  // useSearchParams Suspense-boundary requirement), then hydrate THAT dataset.
+  // No param → the global master. Stays idle (upload zone) if the dataset is
+  // empty — e.g. an artist whose customers haven't been uploaded yet.
   useEffect(() => {
-    fetch("/api/customers?id=master")
+    const params = new URLSearchParams(window.location.search);
+    const artist = params.get("artist");
+    const name = params.get("name");
+    const id = artist || "master";
+    setDatasetId(id);
+    setIsArtistWorld(!!artist);
+    if (name) setDatasetName(name);
+
+    fetch(`/api/customers?id=${encodeURIComponent(id)}`)
       .then((r) => r.json())
       .then((d) => {
         if (d?.dataset?.aggregate?.length) {
@@ -71,15 +86,18 @@ export default function CustomersPage() {
             aggregate: d.dataset.aggregate,
             customerCount: d.dataset.customerCount,
             dropped: 0,
-            sourceLabel: `★ MASTER · saved ${new Date(d.dataset.updatedAt).toISOString().slice(0, 10)}`,
+            sourceLabel: `★ ${d.dataset.name} · saved ${new Date(d.dataset.updatedAt).toISOString().slice(0, 10)}`,
           });
-          setDatasetName(d.dataset.name);
+          // The URL's ?name (artist's display name) wins for branding — the
+          // stored dataset name may be an old CSV filename. Only fall back to
+          // the stored name when no name was passed (e.g. the global master).
+          if (!name) setDatasetName(d.dataset.name);
           setPersistedAt(d.dataset.updatedAt);
         }
       })
       .catch((err) =>
         console.warn(
-          "[CUSTOMERS] master hydrate failed:",
+          "[CUSTOMERS] hydrate failed:",
           err instanceof Error ? err.message : String(err),
         ),
       );
@@ -115,15 +133,15 @@ export default function CustomersPage() {
               sourceLabel: file.name,
             });
 
-            // Auto-persist to Turso as the canonical master so the next visit
-            // hydrates instantly AND so the routing-sheet crossover panel can
-            // pull from the same source without re-upload. Includes raw rows
-            // so the routing panel doesn't have to re-parse the CSV.
+            // Auto-persist to Turso keyed to THIS dataset (per-artist when we
+            // arrived via ?artist, else the global master) so the next visit
+            // and the routing panel hydrate from the same source. Includes raw
+            // rows so the routing panel doesn't re-parse the CSV.
             fetch("/api/customers", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                id: "master",
+                id: datasetId,
                 name: datasetName,
                 aggregate,
                 customerCount: customers.length,
@@ -151,7 +169,7 @@ export default function CustomersPage() {
           setStage({ kind: "error", message: err.message ?? "Parse failed" }),
       });
     },
-    [datasetName],
+    [datasetName, datasetId],
   );
 
   const onDrop = (e: React.DragEvent) => {
@@ -187,11 +205,23 @@ export default function CustomersPage() {
           ←
         </Link>
         <span className="display text-2xl">
-          <span className="text-red">SF</span>{" "}
-          <span className="text-blue">World</span>
+          {isArtistWorld ? (
+            <>
+              <span className="text-red">{datasetName}</span>
+              <span className="text-ink/40">&apos;s</span>{" "}
+              <span className="text-blue">World</span>
+            </>
+          ) : (
+            <>
+              <span className="text-red">SF</span>{" "}
+              <span className="text-blue">World</span>
+            </>
+          )}
         </span>
         <span className="serif-italic text-ink/55 hidden md:inline">
-          everyone you&apos;ve ever sold a song to, on a globe
+          {isArtistWorld
+            ? `every fan ${datasetName} has sold a song to, on a globe`
+            : "everyone you've ever sold a song to, on a globe"}
         </span>
         {stage.kind === "ready" && headerStats && (
           <div className="ml-auto flex items-baseline gap-4 mono text-xs">
@@ -227,13 +257,19 @@ export default function CustomersPage() {
         <section className="flex-1 flex items-center justify-center px-5 py-12">
           <div className="max-w-3xl w-full">
             <h1 className="display text-5xl md:text-7xl leading-[0.9] mb-4">
-              Drop your <span className="text-red">customer</span>{" "}
-              <span className="text-blue">list</span>.
+              Drop{" "}
+              <span className="text-red">
+                {isArtistWorld ? `${datasetName}'s` : "your"}
+              </span>{" "}
+              <span className="text-blue">customers</span>.
             </h1>
             <p className="serif-italic text-ink/70 text-lg mb-8">
               City + state columns required.{" "}
               <span className="not-italic text-base text-ink/55">
-                One CSV → globe forever. Auto-saves as the canonical SF master.
+                One CSV → globe forever.{" "}
+                {isArtistWorld
+                  ? `Saved as ${datasetName}'s own world.`
+                  : "Auto-saves as the canonical SF master."}
               </span>
             </p>
             <label

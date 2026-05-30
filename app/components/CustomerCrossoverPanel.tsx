@@ -29,7 +29,13 @@ const TourMap = dynamic(() => import("./TourMap"), {
   ),
 });
 
-type Props = { events: ArtistEvent[]; artistName: string };
+type Props = {
+  events: ArtistEvent[];
+  artistName: string;
+  /** Stable per-artist identity (sp:<id> | nm:<name>) — keys this artist's
+   *  own customer dataset so Jesse's world is Jesse's, not a shared master. */
+  customerKey: string;
+};
 
 type Loaded = { fileName: string; customers: Customer[]; geocode: GeocodeMap };
 type Stage =
@@ -38,7 +44,11 @@ type Stage =
   | { kind: "ready"; loaded: Loaded }
   | { kind: "error"; message: string };
 
-export function CustomerCrossoverPanel({ events, artistName }: Props) {
+export function CustomerCrossoverPanel({
+  events,
+  artistName,
+  customerKey,
+}: Props) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [dragOver, setDragOver] = useState(false);
   const [radiusMiles, setRadiusMiles] = useState(60);
@@ -49,12 +59,12 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
   const inputId = `crossover-csv-${artistName.replace(/\W+/g, "-")}`;
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // On mount: try to hydrate from the canonical SF master dataset so the
-  // user doesn't re-upload the same CSV across sessions. Stays in idle if
-  // no master exists or Turso isn't configured — the drop zone takes over.
+  // On mount: hydrate THIS ARTIST's saved customer dataset (keyed by identity)
+  // so their world + routing persist across sessions without re-upload. Stays
+  // idle if this artist has no saved data yet — the drop zone takes over.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/customers?id=master&raw=1")
+    fetch(`/api/customers?id=${encodeURIComponent(customerKey)}&raw=1`)
       .then((r) => r.json())
       .then(async (d) => {
         if (cancelled) return;
@@ -64,7 +74,7 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
           setStage({
             kind: "ready",
             loaded: {
-              fileName: `★ MASTER · ${d.dataset.name}`,
+              fileName: `★ ${d.dataset.name}`,
               customers: d.raw as Customer[],
               geocode: US_CITY_LATLNG as unknown as GeocodeMap,
             },
@@ -81,7 +91,7 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [customerKey]);
 
   const handleFile = (file: File) => {
     setStage({ kind: "parsing", fileName: file.name });
@@ -103,17 +113,18 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
           });
           setUsingMaster(false);
 
-          // Persist as the canonical SF master so SF World + future routing
-          // sessions hydrate from the same source. Replaces any existing
-          // master — Greg explicitly asked for "upload stays stored until a
-          // new one is integrated." Fire-and-forget; UI shouldn't block.
+          // Persist keyed to THIS artist so their Songfinch World + future
+          // routing sessions hydrate from the same source. Replaces this
+          // artist's prior dataset (upload stays until re-uploaded). Dataset
+          // name = artist name so the world is branded "{Artist}'s World".
+          // Fire-and-forget; UI shouldn't block.
           const { aggregate } = aggregateByCity(customers, geocode);
           fetch("/api/customers", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              id: "master",
-              name: file.name,
+              id: customerKey,
+              name: artistName,
               aggregate,
               customerCount: customers.length,
               raw: customers,
@@ -125,7 +136,7 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
             })
             .catch((err) =>
               console.warn(
-                "[CROSSOVER] master persist failed:",
+                "[CROSSOVER] customer persist failed:",
                 err instanceof Error ? err.message : String(err),
               ),
             );
@@ -175,11 +186,14 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
                 : "border-ink/25 hover:border-ink/60"
             }`}
           >
-            <div className="mono mb-1">UPLOAD CUSTOMER CSV → ROUTING SHEET</div>
+            <div className="mono mb-1">
+              UPLOAD {artistName.toUpperCase()}&apos;S CUSTOMERS → ROUTING SHEET
+            </div>
             <div className="serif-italic text-ink/65 text-sm">
               Expected columns: <span className="mono">city, state</span> (plus
-              anything else). Saved as the SF master — used here and on the ◯ SF
-              World globe. Stays until you upload a new one.
+              anything else). Saved as {artistName}&apos;s own dataset — powers
+              this routing sheet and {artistName}&apos;s ◯ Songfinch World
+              globe. Stays until you upload a new one.
             </div>
           </label>
           <input
@@ -212,6 +226,7 @@ export function CustomerCrossoverPanel({ events, artistName }: Props) {
           loaded={stage.loaded}
           events={events}
           artistName={artistName}
+          customerKey={customerKey}
           radiusMiles={radiusMiles}
           setRadiusMiles={setRadiusMiles}
           usingMaster={usingMaster}
@@ -263,6 +278,7 @@ function RoutingSheet({
   loaded,
   events,
   artistName,
+  customerKey,
   radiusMiles,
   setRadiusMiles,
   usingMaster,
@@ -271,6 +287,7 @@ function RoutingSheet({
   loaded: Loaded;
   events: ArtistEvent[];
   artistName: string;
+  customerKey: string;
   radiusMiles: number;
   setRadiusMiles: (n: number) => void;
   usingMaster: boolean;
@@ -540,27 +557,38 @@ function RoutingSheet({
 
   return (
     <div className="rsheet">
-      {/* Header — kicker + artist name, master badge, replace */}
+      {/* Header — kicker + artist name, saved badge, world link, replace */}
       <div className="rs-head">
         <div>
           <div className="rs-kicker">Routing Sheet</div>
           <div className="rs-name">{artistName}</div>
         </div>
-        {usingMaster && (
-          <span
-            className="rs-master"
-            title="Hydrated from the SF master dataset. Replace to upload a new one."
+        <div className="rs-head-actions">
+          {usingMaster && (
+            <span
+              className="rs-master"
+              title={`Saved as ${artistName}'s own customer dataset. Replace to upload a new one.`}
+            >
+              <span className="rs-dot" /> Saved
+            </span>
+          )}
+          {/* Jump to this artist's own Songfinch World globe — same dataset,
+              spatial lens. Opens the per-artist /customers view. */}
+          <a
+            className="rs-worldlink"
+            href={`/customers?artist=${encodeURIComponent(customerKey)}&name=${encodeURIComponent(artistName)}`}
+            title={`See ${artistName}'s customers on the globe`}
           >
-            <span className="rs-dot" /> SF Master
-          </span>
-        )}
-        <button
-          className="rs-replace"
-          onClick={onReset}
-          title="Upload a different CSV — replaces the SF master"
-        >
-          Replace
-        </button>
+            ◯ {artistName}&apos;s Songfinch World →
+          </a>
+          <button
+            className="rs-replace"
+            onClick={onReset}
+            title="Upload a different CSV — replaces this artist's dataset"
+          >
+            Replace
+          </button>
+        </div>
       </div>
 
       {/* Stat ribbon — the bad number (low coverage) flags itself in red */}

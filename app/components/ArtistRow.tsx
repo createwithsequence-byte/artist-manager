@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ArtistReport, Signal } from "@/lib/types";
+import { artistIdentity } from "@/lib/identity";
 import { CustomerCrossoverPanel } from "./CustomerCrossoverPanel";
 
 const SIGNAL_CONFIG: Record<
@@ -384,6 +385,7 @@ export function ArtistRow({
               <CustomerCrossoverPanel
                 events={report.events}
                 artistName={report.name}
+                customerKey={artistIdentity(report)}
               />
             </div>
           )}

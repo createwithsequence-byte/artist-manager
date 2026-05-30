@@ -112,8 +112,8 @@ export default function Home() {
   // SF Customer World — count of the canonical "master" customer dataset so
   // the home chip surfaces "your audience is X fans" without a click.
   const [worldStats, setWorldStats] = useState<{
-    customerCount: number;
-    cityCount: number;
+    worldCount: number;
+    totalFans: number;
   } | null>(null);
 
   useEffect(() => {
@@ -128,18 +128,18 @@ export default function Home() {
           err instanceof Error ? err.message : String(err),
         ),
       );
-    // Load the master-dataset meta. Light call (count + city_count only).
+    // Count all saved customer worlds (per-artist datasets + any global
+    // master) + total fans across them, for the home chip.
     fetch("/api/customers")
       .then((r) => r.json())
       .then((d) => {
-        const master = Array.isArray(d?.datasets)
-          ? d.datasets.find((x: { id: string }) => x.id === "master")
-          : null;
-        if (master) {
-          setWorldStats({
-            customerCount: master.customerCount,
-            cityCount: master.cityCount,
-          });
+        if (Array.isArray(d?.datasets) && d.datasets.length > 0) {
+          const totalFans = d.datasets.reduce(
+            (s: number, x: { customerCount?: number }) =>
+              s + (x.customerCount || 0),
+            0,
+          );
+          setWorldStats({ worldCount: d.datasets.length, totalFans });
         }
       })
       .catch((err) =>
@@ -940,13 +940,14 @@ export default function Home() {
               </div>
             )}
 
-            {/* SF World — the customer audience globe. Always present (the
-                empty-state version invites the first upload), but glows up
-                with stats once a master dataset is saved. Separate route
-                because it's a different lens on the data, not artist work. */}
+            {/* Songfinch Worlds — per-artist customer globes. Each artist
+                gets their own world once their customers are uploaded (in
+                their row). This chip is the top-level entry; the empty-state
+                version invites the first one. */}
             <div className="mt-10">
               <div className="mono text-ink/50 mb-3">
-                ↳ {worldStats ? "OR OPEN THE SF WORLD" : "OR MAP YOUR AUDIENCE"}
+                ↳{" "}
+                {worldStats ? "OR OPEN SONGFINCH WORLDS" : "OR MAP AN AUDIENCE"}
               </div>
               <Link
                 href="/customers"
@@ -954,20 +955,21 @@ export default function Home() {
               >
                 <span className="display text-xl">
                   <span className="text-red group-hover:text-cream/90">◯</span>{" "}
-                  SF WORLD
+                  SONGFINCH WORLDS
                 </span>
                 {worldStats ? (
                   <span className="mono text-ink/55 group-hover:text-cream/70 shrink-0">
-                    {worldStats.customerCount.toLocaleString()} FANS ·{" "}
-                    {worldStats.cityCount.toLocaleString()} CITIES
+                    {worldStats.worldCount} WORLD
+                    {worldStats.worldCount === 1 ? "" : "S"} ·{" "}
+                    {worldStats.totalFans.toLocaleString()} FANS
                   </span>
                 ) : (
                   <span className="mono text-ink/40 group-hover:text-cream/60 shrink-0">
-                    NO DATASET YET
+                    NO WORLDS YET
                   </span>
                 )}
                 <span className="serif-italic text-ink/45 group-hover:text-cream/60 flex-1 hidden sm:block">
-                  every customer on a 3D globe — upload once, browse forever
+                  each artist&apos;s fans on a 3D globe — upload in their row
                 </span>
                 <span className="mono text-ink/40 group-hover:text-cream shrink-0">
                   →
