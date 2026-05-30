@@ -33,12 +33,17 @@ export function buildTourContext(
     );
 
   const stopLines = stops
-    .map(
-      (s) =>
-        `  ${s.event.date} · ${s.event.city}, ${s.stateCode ?? "?"} · ${s.withinRadiusCount} fans ≤${radiusMiles}mi${
-          s.event.venue === "PROVISIONAL" ? " (PROPOSED, not yet booked)" : ""
-        }`,
-    )
+    .map((s) => {
+      // Surface the venue name so the agent can read the artist's circuit
+      // (e.g. all-Christian venues) and honor venue-type asks accordingly.
+      const venue =
+        s.event.venue && s.event.venue !== "PROVISIONAL"
+          ? `${s.event.venue} · `
+          : "";
+      return `  ${s.event.date} · ${venue}${s.event.city}, ${s.stateCode ?? "?"} · ${s.withinRadiusCount} fans ≤${radiusMiles}mi${
+        s.event.venue === "PROVISIONAL" ? " (PROPOSED, not yet booked)" : ""
+      }`;
+    })
     .join("\n");
 
   const legLines = result.legs
