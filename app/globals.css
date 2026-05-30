@@ -70,3 +70,867 @@ body {
   background-size: 200% 100%;
   animation: shimmer 1.8s linear infinite;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   ROUTING SHEET v2 — "clean white" redesign.
+   All scoped under .rsheet so it never leaks into the cream workbench
+   surrounding it. Reads as a lifted, gallery-white focus surface: real type
+   hierarchy, signal color as sparse accent, generous air. Fonts map to the
+   project's loaded next/font vars, not hardcoded Google names.
+   ════════════════════════════════════════════════════════════════════════ */
+.rsheet {
+  --rs-surface: #ffffff;
+  --rs-canvas: #fcfcfa;
+  --rs-line: #ececea;
+  --rs-line-strong: #e0e0da;
+  --rs-ink: #1a1a18;
+  --rs-ink-2: #5c5c56;
+  --rs-ink-3: #9b9b94;
+  --rs-ink-4: #c2c2ba;
+  --rs-red: #f23222;
+  --rs-blue: #1e2ddb;
+  --rs-lime: #c9f33a;
+  --rs-lime-ink: #5d7a00;
+  --rs-red-wash: #fdedeb;
+  --rs-blue-wash: #eceefb;
+  background: var(--rs-canvas);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-ink);
+  padding: 22px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.rsheet .rs-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.rsheet .rs-label {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+}
+.rsheet .rs-serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+.rsheet .rs-display {
+  font-family: var(--font-display);
+  line-height: 0.9;
+}
+.rsheet .rs-tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* header */
+.rsheet .rs-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+.rsheet .rs-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+  margin-bottom: 5px;
+}
+.rsheet .rs-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 30px;
+  letter-spacing: 0.01em;
+  line-height: 0.85;
+  text-transform: uppercase;
+}
+.rsheet .rs-master {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-lime-ink);
+  margin-bottom: 6px;
+}
+.rsheet .rs-master .rs-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rs-lime);
+  box-shadow: 0 0 0 2px #eaf6c2;
+}
+.rsheet .rs-replace {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+  border: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--rs-line-strong);
+  padding-bottom: 1px;
+  cursor: pointer;
+}
+.rsheet .rs-replace:hover {
+  color: var(--rs-red);
+  border-color: var(--rs-red);
+}
+
+/* stat ribbon */
+.rsheet .rs-ribbon {
+  display: flex;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+  margin: 16px 0 14px;
+}
+.rsheet .rs-stat {
+  padding: 11px 18px;
+  border-right: 1px solid var(--rs-line);
+}
+.rsheet .rs-stat:last-child {
+  border-right: 0;
+}
+.rsheet .rs-stat .k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+  margin-bottom: 3px;
+  white-space: nowrap;
+}
+.rsheet .rs-stat .v {
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.rsheet .rs-stat .v small {
+  font-weight: 450;
+  color: var(--rs-ink-2);
+  font-size: 12px;
+}
+.rsheet .rs-stat.flag {
+  background: var(--rs-red-wash);
+}
+.rsheet .rs-stat.flag .v {
+  color: var(--rs-red);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rsheet .rs-cov {
+  width: 46px;
+  height: 5px;
+  background: #f3cdc8;
+  border-radius: 3px;
+  overflow: hidden;
+  display: inline-block;
+}
+.rsheet .rs-cov i {
+  display: block;
+  height: 100%;
+  background: var(--rs-red);
+}
+
+/* insight line */
+.rsheet .rs-insight {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 14px;
+  border: 1px solid var(--rs-line);
+  border-left: 2px solid var(--rs-blue);
+  background: var(--rs-surface);
+  margin-bottom: 18px;
+  font-size: 13.5px;
+}
+.rsheet .rs-insight .rs-serif {
+  color: var(--rs-ink-2);
+}
+.rsheet .rs-insight b {
+  font-weight: 600;
+}
+.rsheet .rs-insight .go {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--rs-blue);
+  border: 0;
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rsheet .rs-insight .go:hover {
+  background: var(--rs-ink);
+}
+
+/* mode toggle + radius lens */
+.rsheet .rs-modebar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--rs-canvas);
+  padding: 6px 0;
+}
+.rsheet .rs-seg {
+  display: inline-flex;
+  border: 1px solid var(--rs-line-strong);
+  background: var(--rs-surface);
+  border-radius: 7px;
+  overflow: hidden;
+  padding: 3px;
+  gap: 2px;
+}
+.rsheet .rs-seg button {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--rs-ink-2);
+  background: transparent;
+  border: 0;
+  padding: 6px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.rsheet .rs-seg button[aria-checked="true"] {
+  background: var(--rs-ink);
+  color: #fff;
+}
+.rsheet .rs-hint {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--rs-ink-3);
+  font-size: 13px;
+}
+.rsheet .rs-lens {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.rsheet .rs-lens input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 120px;
+  height: 3px;
+  background: var(--rs-line-strong);
+  border-radius: 3px;
+  outline: none;
+}
+.rsheet .rs-lens input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--rs-ink);
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--rs-line-strong);
+}
+.rsheet .rs-lens input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--rs-ink);
+  cursor: pointer;
+  border: 2px solid #fff;
+}
+.rsheet .rs-lens .v {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--rs-ink);
+  min-width: 50px;
+}
+
+/* two-pane */
+.rsheet .rs-grid {
+  display: grid;
+  grid-template-columns: 1.12fr 0.88fr;
+  gap: 26px;
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .rsheet .rs-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* timeline */
+.rsheet .rs-tl {
+  position: relative;
+}
+.rsheet .rs-tl::before {
+  content: "";
+  position: absolute;
+  left: 78px;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background: var(--rs-line-strong);
+}
+.rsheet .rs-stop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 13px 0;
+  cursor: pointer;
+}
+.rsheet .rs-date {
+  justify-self: end;
+  text-align: right;
+  line-height: 1.15;
+}
+.rsheet .rs-date .dow {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--rs-ink-3);
+  text-transform: uppercase;
+}
+.rsheet .rs-date .dm {
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: var(--rs-ink-2);
+}
+.rsheet .rs-node {
+  position: absolute;
+  left: 74px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid var(--rs-red);
+  z-index: 2;
+}
+.rsheet .rs-stop.sel .rs-node {
+  background: var(--rs-red);
+  box-shadow: 0 0 0 4px rgba(242, 50, 34, 0.18);
+}
+.rsheet .rs-node.add {
+  border-color: var(--rs-blue);
+}
+.rsheet .rs-node.add::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  border-radius: 50%;
+  background: var(--rs-blue);
+}
+.rsheet .rs-body {
+  min-width: 0;
+  padding-left: 8px;
+}
+.rsheet .rs-venue {
+  font-size: 16px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: var(--rs-ink);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rsheet .rs-venue .add-tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rs-blue);
+  background: var(--rs-blue-wash);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.rsheet .rs-city {
+  font-size: 12.5px;
+  color: var(--rs-ink-3);
+  margin-top: 2px;
+}
+.rsheet .rs-who {
+  margin-left: 9px;
+  color: var(--rs-ink-4);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.rsheet .rs-stop:hover .rs-who,
+.rsheet .rs-who.on {
+  opacity: 1;
+}
+.rsheet .rs-who:hover {
+  color: var(--rs-ink);
+}
+.rsheet .rs-remove {
+  margin-left: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--rs-ink-4);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.rsheet .rs-remove:hover {
+  color: var(--rs-red);
+}
+
+/* reach signal */
+.rsheet .rs-reach {
+  justify-self: end;
+  text-align: right;
+  min-width: 92px;
+}
+.rsheet .rs-reach .n {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 23px;
+  line-height: 0.8;
+  letter-spacing: 0.01em;
+  color: var(--rs-ink);
+}
+.rsheet .rs-reach .n.dim {
+  color: var(--rs-ink-3);
+}
+.rsheet .rs-reach .u {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+  margin-top: 3px;
+}
+.rsheet .rs-bar {
+  width: 84px;
+  height: 4px;
+  background: #efefe9;
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 6px 0 0 auto;
+}
+.rsheet .rs-bar i {
+  display: block;
+  height: 100%;
+}
+.rsheet .rs-bar i.lo {
+  background: var(--rs-ink-4);
+}
+.rsheet .rs-bar i.mid {
+  background: var(--rs-red);
+}
+.rsheet .rs-bar i.hi {
+  background: var(--rs-lime);
+}
+
+/* who detail */
+.rsheet .rs-whobox {
+  margin: -4px 0 8px 90px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--rs-blue);
+  background: var(--rs-surface);
+}
+.rsheet .rs-whorow {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rsheet .rs-whorow .c {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.rsheet .rs-whorow .c.accent {
+  color: var(--rs-red);
+}
+.rsheet .rs-whorow .c.sec {
+  color: var(--rs-ink-3);
+}
+.rsheet .rs-whorow .nm {
+  color: var(--rs-ink-2);
+}
+.rsheet .rs-whomore {
+  color: var(--rs-ink-4);
+}
+
+/* leg connector — subordinate */
+.rsheet .rs-leg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 18px;
+  padding: 2px 0;
+}
+.rsheet .rs-leg .lwrap {
+  grid-column: 2;
+  padding-left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rsheet .rs-leg .mi {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--rs-ink-3);
+  letter-spacing: 0.03em;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.rsheet .rs-leg.warn .mi {
+  color: var(--rs-red);
+}
+.rsheet .rs-leg .dur {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--rs-ink-4);
+  letter-spacing: 0.03em;
+}
+.rsheet .rs-leg .mode-w {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-ink-4);
+  border: 1px solid var(--rs-line-strong);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.rsheet .rs-leg .fill {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rs-blue);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  padding: 0;
+}
+.rsheet .rs-leg .fill:hover {
+  border-color: var(--rs-blue);
+}
+.rsheet .rs-leg .tick {
+  position: absolute;
+  left: 74px;
+  width: 11px;
+  display: flex;
+  justify-content: center;
+  inset-block: 0;
+}
+.rsheet .rs-leg .tick span {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--rs-line-strong);
+}
+.rsheet .rs-leg.warn .tick span {
+  background: var(--rs-red);
+}
+
+/* fills */
+.rsheet .rs-fills {
+  grid-column: 2;
+  padding: 6px 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rsheet .rs-fhead {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+  padding: 2px 0 4px;
+}
+.rsheet .rs-fillrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 11px;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+}
+.rsheet .rs-fillrow:hover {
+  border-color: var(--rs-blue);
+  background: var(--rs-blue-wash);
+}
+.rsheet .rs-fillrow .add {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--rs-blue);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  line-height: 1;
+}
+.rsheet .rs-fillrow .add:disabled {
+  color: var(--rs-ink-4);
+  cursor: default;
+}
+.rsheet .rs-fillrow .fcity {
+  font-size: 13px;
+  font-weight: 500;
+}
+.rsheet .rs-fillrow .ffans {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  margin-left: auto;
+}
+.rsheet .rs-fillrow .fmeta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--rs-ink-3);
+  letter-spacing: 0.03em;
+  min-width: 92px;
+  text-align: right;
+}
+
+/* tour-here controls */
+.rsheet .rs-thcard {
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+  padding: 14px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.rsheet .rs-thfield {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rsheet .rs-thin {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  border: 1px solid var(--rs-line-strong);
+  border-radius: 5px;
+  padding: 7px 9px;
+  width: 92px;
+  background: #fff;
+  color: var(--rs-ink);
+}
+.rsheet .rs-thin:focus {
+  outline: none;
+  border-color: var(--rs-ink);
+}
+.rsheet .rs-thseg {
+  display: inline-flex;
+  border: 1px solid var(--rs-line-strong);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.rsheet .rs-thseg button {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 0;
+  border-right: 1px solid var(--rs-line);
+  background: #fff;
+  color: var(--rs-ink-2);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.rsheet .rs-thseg button:last-child {
+  border-right: 0;
+}
+.rsheet .rs-thseg button.sel {
+  background: var(--rs-ink);
+  color: #fff;
+}
+.rsheet .rs-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--rs-line-strong);
+  background: #fff;
+  color: var(--rs-ink);
+  padding: 9px 13px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.rsheet .rs-btn:hover {
+  border-color: var(--rs-ink);
+}
+.rsheet .rs-btn.blue {
+  background: var(--rs-blue);
+  color: #fff;
+  border-color: var(--rs-blue);
+}
+.rsheet .rs-btn.blue:hover {
+  background: var(--rs-ink);
+  border-color: var(--rs-ink);
+}
+.rsheet .rs-btn.ghost {
+  border: 0;
+  background: none;
+  color: var(--rs-ink-3);
+  text-decoration: underline;
+  padding: 9px 4px;
+}
+.rsheet .rs-btn.ghost:hover {
+  color: var(--rs-red);
+}
+.rsheet .rs-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* tour-here preview */
+.rsheet .rs-thhead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 2px 10px;
+  flex-wrap: wrap;
+}
+.rsheet .rs-thstat {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--rs-ink);
+}
+.rsheet .rs-throw2 {
+  display: grid;
+  grid-template-columns: 14px 24px 56px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+}
+.rsheet .rs-thnode {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--rs-blue);
+  background: #fff;
+  position: relative;
+}
+.rsheet .rs-thnode::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  border-radius: 50%;
+  background: var(--rs-blue);
+}
+.rsheet .rs-thidx {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--rs-ink-3);
+}
+.rsheet .rs-thdate {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--rs-ink-2);
+}
+.rsheet .rs-thcity {
+  font-size: 14px;
+  font-weight: 500;
+}
+.rsheet .rs-thcity .st {
+  color: var(--rs-ink-3);
+  font-weight: 400;
+}
+.rsheet .rs-thfans {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+}
+
+/* map legend */
+.rsheet .rs-maplegend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+}
+.rsheet .rs-maplegend .lg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* agent dock */
+.rsheet .rs-agent {
+  margin-top: 16px;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+}
+.rsheet .rs-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 11px 13px;
+  cursor: pointer;
+}
+.rsheet .rs-agent-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-ink);
+}
+.rsheet .rs-agent-sub {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 12px;
+  color: var(--rs-ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.rsheet .rs-agent-chev {
+  margin-left: auto;
+  color: var(--rs-ink-3);
+}
+.rsheet .rs-foot {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--rs-ink-3);
+  font-size: 12px;
+  margin-top: 14px;
+  max-width: 60ch;
+}

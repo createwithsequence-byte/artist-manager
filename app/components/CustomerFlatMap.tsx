@@ -130,6 +130,9 @@ export default function CustomerFlatMap({
   }, [aggregate]);
 
   return (
-    <div ref={containerRef} className="w-full h-[560px] border border-ink/15" />
+    <div
+      ref={containerRef}
+      className="w-full h-full min-h-[520px] border border-ink/15"
+    />
   );
 }

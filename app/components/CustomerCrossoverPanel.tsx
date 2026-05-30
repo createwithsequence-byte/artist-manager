@@ -515,7 +515,6 @@ function RoutingSheet({
     result.totalRouteMiles - baseline.totalRouteMiles,
   );
 
-  const coverageBlocks = Math.round(result.reachPct * 5);
   const dateRange =
     shows.length > 0
       ? `${fmtDay(shows[0].event.date)} → ${fmtDay(shows[shows.length - 1].event.date)}`
@@ -532,110 +531,142 @@ function RoutingSheet({
         }))
       : result.mapData.suggestions;
 
+  // Reach-bar scale — the densest booked stop anchors the bars so each row's
+  // fill reads relative to the best stop on this run.
+  const maxReach = Math.max(1, ...shows.map((s) => s.withinRadiusCount));
+  // Insight nudge — how many fan-dense cities sit on-route, fillable in one
+  // BUILD REVISED click. Honest count, no fabricated projected %.
+  const onRouteFillCities = result.routingSuggestions.length;
+
   return (
-    <div>
-      {/* Header */}
-      <div className="mono text-ink/55 mb-2 flex flex-wrap gap-x-4 gap-y-1 items-baseline">
-        <span className="display text-lg text-ink">
-          {artistName.toUpperCase()} — ROUTING SHEET
-        </span>
-        <span className="text-ink/40">{loaded.fileName}</span>
+    <div className="rsheet">
+      {/* Header — kicker + artist name, master badge, replace */}
+      <div className="rs-head">
+        <div>
+          <div className="rs-kicker">Routing Sheet</div>
+          <div className="rs-name">{artistName}</div>
+        </div>
         {usingMaster && (
           <span
-            className="text-lime"
-            title="Hydrated from the SF master dataset. Replace to upload a new master."
+            className="rs-master"
+            title="Hydrated from the SF master dataset. Replace to upload a new one."
           >
-            ● SF MASTER
+            <span className="rs-dot" /> SF Master
           </span>
         )}
         <button
+          className="rs-replace"
           onClick={onReset}
-          className="mono text-ink/50 underline ml-auto hover:text-red"
           title="Upload a different CSV — replaces the SF master"
         >
-          REPLACE
+          Replace
         </button>
       </div>
 
-      {/* Route strip — orientation, not verdict */}
-      <div className="mono text-ink/70 border-y border-ink/15 py-2 mb-4 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        <span>{shows.length} DATES</span>
-        <span className="text-ink/40">·</span>
-        <span>{dateRange}</span>
-        <span className="text-ink/40">·</span>
-        <span>{result.totalRouteMiles.toLocaleString()} RTE MI</span>
-        <span className="text-ink/40">·</span>
-        <span>LONGEST GAP {result.longestGapDays}D</span>
-        <span className="text-ink/40">·</span>
-        <span className="flex items-center gap-1">
-          FAN COVERAGE
-          <span className="tracking-tight">
-            {"▓".repeat(coverageBlocks)}
-            <span className="text-ink/25">
-              {"░".repeat(5 - coverageBlocks)}
-            </span>
-          </span>
-          {Math.round(result.reachPct * 100)}%
-          {result.reachPct < 0.15 && <span className="text-red ml-1">⚑</span>}
-        </span>
+      {/* Stat ribbon — the bad number (low coverage) flags itself in red */}
+      <div className="rs-ribbon">
+        <div className="rs-stat">
+          <div className="k">Dates</div>
+          <div className="v rs-tnum">{shows.length}</div>
+        </div>
+        <div className="rs-stat">
+          <div className="k">Window</div>
+          <div className="v">{dateRange}</div>
+        </div>
+        <div className="rs-stat">
+          <div className="k">Route</div>
+          <div className="v rs-tnum">
+            {result.totalRouteMiles.toLocaleString()} <small>mi</small>
+          </div>
+        </div>
+        <div className="rs-stat">
+          <div className="k">Longest gap</div>
+          <div className="v rs-tnum">
+            {result.longestGapDays} <small>days</small>
+          </div>
+        </div>
+        <div className={`rs-stat${result.reachPct < 0.15 ? " flag" : ""}`}>
+          <div className="k">Fan coverage</div>
+          <div className="v rs-tnum">
+            {Math.round(result.reachPct * 100)}%
+            {result.reachPct < 0.15 && (
+              <span className="rs-cov">
+                <i
+                  style={{
+                    width: `${Math.max(3, Math.round(result.reachPct * 100))}%`,
+                  }}
+                />
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Sticky mode toggle — peer modes: keep the booked dates (CURRENT)
-          vs propose a from-scratch fan-first run (TOUR HERE). Per the redesign
-          this lives just above the routing controls so flipping never loses
-          scroll position. role=radiogroup so screen readers announce the
-          mode set; arrow keys would be a future polish. */}
-      <div
-        className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-cream/95 backdrop-blur border-b border-ink/15 mb-3 flex items-center gap-3"
-        role="radiogroup"
-        aria-label="Routing mode"
-      >
-        <span className="mono text-ink/45 text-xs hidden sm:inline">
-          ROUTING
-        </span>
-        <div className="flex border border-ink/25 mono text-xs">
+      {/* Insight — turn the worst stat into an action (current mode, pre-build) */}
+      {mode === "current" && !revisedActive && onRouteFillCities > 0 && (
+        <div className="rs-insight">
+          <span className="rs-serif">
+            Only <b>{Math.round(result.reachPct * 100)}%</b> of {artistName}
+            &apos;s fanbase is within reach.{" "}
+            <b>
+              {onRouteFillCities} on-route{" "}
+              {onRouteFillCities === 1 ? "city" : "cities"}
+            </b>{" "}
+            could lift it.
+          </span>
+          <button className="go" onClick={buildRevised}>
+            Build revised tour →
+          </button>
+        </div>
+      )}
+
+      {/* Mode toggle + radius lens — one sticky control bar. The lens governs
+          every fan number on screen, so it lives here (visible) not buried. */}
+      <div className="rs-modebar" role="radiogroup" aria-label="Routing mode">
+        <div className="rs-seg">
           <button
             role="radio"
             aria-checked={mode === "current"}
             onClick={() => setMode("current")}
-            className={`px-3 h-8 transition-colors ${
-              mode === "current"
-                ? "bg-ink text-cream"
-                : "text-ink/55 hover:text-ink"
-            }`}
             title="Fill gaps between his booked dates"
           >
-            ● CURRENT TOUR
+            Current tour
           </button>
           <button
             role="radio"
             aria-checked={mode === "tourhere"}
             onClick={() => setMode("tourhere")}
-            className={`px-3 h-8 border-l border-ink/25 transition-colors ${
-              mode === "tourhere"
-                ? "bg-ink text-cream"
-                : "text-ink/55 hover:text-ink"
-            }`}
             title="Propose a from-scratch tour through his fanbase"
           >
-            ✦ TOUR HERE
+            Tour here
           </button>
         </div>
-        <span className="serif-italic text-ink/55 text-xs hidden md:inline">
+        <span className="rs-hint">
           {mode === "current"
             ? "Fill the gaps in his booked run."
             : "Build a future tour from his fanbase, from scratch."}
         </span>
+        <label className="rs-lens" aria-label="Reach radius">
+          <span className="rs-label">Reach radius</span>
+          <input
+            type="range"
+            min={25}
+            max={250}
+            step={5}
+            value={radiusMiles}
+            onChange={(e) => setRadiusMiles(parseInt(e.target.value, 10))}
+          />
+          <span className="v rs-tnum">{radiusMiles} mi</span>
+        </label>
       </div>
 
-      {/* TOUR HERE controls — only render in tourhere mode. Inputs are dense,
-          mono labels, on-system. Propose stays disabled when there's no
-          untapped pool to draw from. */}
+      {/* TOUR HERE controls — clean card. Propose disabled with no untapped. */}
       {mode === "tourhere" && (
-        <div className="mb-4 border border-ink/15 bg-ink/[0.02] p-3 flex flex-wrap items-end gap-x-4 gap-y-3 text-sm">
-          <label className="flex flex-col gap-1">
-            <span className="mono text-ink/50 text-xs">HOW MANY SHOWS</span>
+        <div className="rs-thcard">
+          <label className="rs-thfield">
+            <span className="rs-label">How many shows</span>
             <input
+              className="rs-thin"
               type="number"
               min={2}
               max={40}
@@ -645,21 +676,21 @@ function RoutingSheet({
                   Math.max(2, Math.min(40, parseInt(e.target.value, 10) || 8)),
                 )
               }
-              className="mono w-20 border border-ink/25 bg-cream px-2 h-9 focus:outline-none focus:border-ink"
             />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="mono text-ink/50 text-xs">STARTING</span>
+          <label className="rs-thfield">
+            <span className="rs-label">Starting</span>
             <input
+              className="rs-thin"
               type="date"
               value={thStart}
               onChange={(e) => setThStart(e.target.value)}
-              className="mono border border-ink/25 bg-cream px-2 h-9 focus:outline-none focus:border-ink"
             />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="mono text-ink/50 text-xs">SPACING (DAYS)</span>
+          <label className="rs-thfield">
+            <span className="rs-label">Spacing (days)</span>
             <input
+              className="rs-thin"
               type="number"
               min={1}
               max={30}
@@ -669,27 +700,22 @@ function RoutingSheet({
                   Math.max(1, Math.min(30, parseInt(e.target.value, 10) || 4)),
                 )
               }
-              className="mono w-20 border border-ink/25 bg-cream px-2 h-9 focus:outline-none focus:border-ink"
             />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="mono text-ink/50 text-xs">ROUTING STYLE</span>
-            <div className="flex border border-ink/25 mono text-xs">
+          <label className="rs-thfield">
+            <span className="rs-label">Routing style</span>
+            <span className="rs-thseg">
               {(
                 [
-                  ["geographic", "GEO CHAIN"],
-                  ["density", "DENSITY"],
-                  ["corridor", "CORRIDOR"],
+                  ["geographic", "Geo chain"],
+                  ["density", "Density"],
+                  ["corridor", "Corridor"],
                 ] as const
-              ).map(([k, label], i) => (
+              ).map(([k, label]) => (
                 <button
                   key={k}
                   onClick={() => setThStyle(k)}
-                  className={`px-2.5 h-9 ${i > 0 ? "border-l border-ink/25" : ""} transition-colors ${
-                    thStyle === k
-                      ? "bg-ink text-cream"
-                      : "text-ink/60 hover:text-ink"
-                  }`}
+                  className={thStyle === k ? "sel" : ""}
                   title={
                     k === "geographic"
                       ? "Greedy nearest-neighbor — drivable, agent-style"
@@ -701,70 +727,62 @@ function RoutingSheet({
                   {label}
                 </button>
               ))}
-            </div>
+            </span>
           </label>
           <button
+            className="rs-btn blue"
+            style={{ marginLeft: "auto" }}
             onClick={proposeTourHere}
             disabled={baseline.untappedMarkets.length === 0}
-            className="mono px-3 h-9 bg-blue text-cream hover:bg-ink transition-colors disabled:opacity-30"
           >
-            {thProposal.length > 0 ? "RE-PROPOSE" : "PROPOSE TOUR"} →
+            {thProposal.length > 0 ? "Re-propose" : "Propose tour"} →
           </button>
           {thProposal.length > 0 && (
             <>
               <button
+                className="rs-btn blue"
                 onClick={applyTourHere}
-                className="mono px-3 h-9 bg-red text-cream hover:bg-ink transition-colors"
                 title="Drop these stops into the spine as additive tour dates"
               >
-                ⊕ APPLY ALL {thProposal.length}
+                ⊕ Apply all {thProposal.length}
               </button>
               <button
+                className="rs-btn"
                 onClick={exportMailingList}
-                className="mono px-3 h-9 border border-ink text-ink hover:bg-ink hover:text-cream transition-colors"
                 title="Download a CSV of every fan within radius of these stops"
               >
-                ⇣ EXPORT MAILING LIST
+                ⇣ Export mailing list
               </button>
-              <button
-                onClick={resetTourHere}
-                className="mono text-ink/50 underline hover:text-red"
-              >
-                CLEAR
+              <button className="rs-btn ghost" onClick={resetTourHere}>
+                Clear
               </button>
             </>
           )}
           {baseline.untappedMarkets.length === 0 && (
-            <span className="serif-italic text-ink/55 text-xs">
-              No untapped markets in the customer file — every dense city is
-              already within range of a booked stop. (Try a wider radius.)
+            <span className="rs-hint">
+              No untapped markets — every dense city is already within range of
+              a booked stop. Try a wider radius.
             </span>
           )}
         </div>
       )}
 
-      {/* TOUR HERE preview — chronological list of the proposed stops with
-          fan counts pulled from a one-shot crossover against just the
-          proposal. Sits above the spine so the user reviews before APPLY.
-          Mono row format mirrors the spine's visual rhythm; this is a
-          preview, not a final selectable list, so no per-row controls. */}
+      {/* TOUR HERE preview — proposed stops with per-stop fan counts. Review
+          before APPLY commits them to the spine as additive dates. */}
       {mode === "tourhere" && thProposal.length > 0 && thPreview && (
-        <div className="mb-4 border border-blue/40 bg-blue/[0.04]">
-          <div className="px-3 py-2 border-b border-blue/30 flex items-baseline gap-3 mono text-xs">
-            <span className="text-blue">
-              PROPOSED · {thProposal.length} STOPS
+        <div style={{ marginBottom: "18px" }}>
+          <div className="rs-thhead">
+            <span className="rs-label" style={{ letterSpacing: "0.1em" }}>
+              Proposed · {thProposal.length} stops
             </span>
-            <span className="text-ink/60">
-              {thPreview.reachedCustomers.toLocaleString()} FANS REACHED
-            </span>
-            <span className="text-ink/45">
-              ({Math.round(thPreview.reachPct * 100)}% OF FILE @ {dRadius}MI)
-            </span>
-            <span className="text-ink/45 ml-auto serif-italic">
-              Review then APPLY ALL to commit to the spine.
+            <span className="rs-thstat">
+              {thPreview.reachedCustomers.toLocaleString()} fans reached{" "}
+              <span style={{ color: "var(--rs-ink-3)" }}>
+                · {Math.round(thPreview.reachPct * 100)}% of file @ {dRadius}mi
+              </span>
             </span>
           </div>
-          <ol className="divide-y divide-blue/15">
+          <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
             {[...thPreview.perEvent]
               .sort((a, b) =>
                 a.event.date < b.event.date
@@ -774,89 +792,73 @@ function RoutingSheet({
                     : 0,
               )
               .map((pe, i) => (
-                <li
+                <div
                   key={`${pe.event.date}-${pe.event.city}`}
-                  className="px-3 py-2 flex items-baseline gap-3 text-sm"
+                  className="rs-throw2"
                 >
-                  <span className="mono text-ink/40 w-6 tabular-nums">
+                  <span className="rs-thnode" />
+                  <span className="rs-thidx rs-tnum">
                     {String(i + 1).padStart(2, "0")}
                   </span>
-                  <span className="mono text-ink/70 w-24">
-                    {fmtDay(pe.event.date)}
-                  </span>
-                  <span className="font-medium">
+                  <span className="rs-thdate">{fmtDay(pe.event.date)}</span>
+                  <span className="rs-thcity">
                     {pe.event.city}
-                    <span className="text-ink/45">
+                    <span className="st">
                       , {pe.event.state || pe.stateCode || "??"}
                     </span>
                   </span>
-                  <span className="mono text-blue ml-auto tabular-nums">
-                    {pe.withinRadiusCount.toLocaleString()} FANS
+                  <span className="rs-thfans rs-tnum">
+                    {pe.withinRadiusCount.toLocaleString()}
                   </span>
-                </li>
+                </div>
               ))}
-          </ol>
+          </div>
         </div>
       )}
 
-      {/* CURRENT-MODE revised-tour bar — only render in current mode. */}
-      {mode === "current" && (
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          {!revisedActive ? (
-            <>
-              <button
-                onClick={buildRevised}
-                className="mono px-3 h-9 bg-blue text-cream hover:bg-ink transition-colors"
-              >
-                BUILD REVISED TOUR →
-              </button>
-              <span className="serif-italic text-ink/55 text-sm">
-                Auto-fills every gap with the best customer cities on-route at{" "}
-                {radiusMiles}mi — keeps your anchored dates, adds stops between
-                them.
+      {/* Revised-tour status — only once a revision exists. The BUILD CTA
+          lives in the insight line above when nothing's been built yet. */}
+      {mode === "current" && revisedActive && (
+        <div
+          className="rs-insight"
+          style={{ borderLeftColor: "var(--rs-red)" }}
+        >
+          <span className="rs-serif">
+            <b style={{ color: "var(--rs-blue)" }}>Revised ✓</b> +
+            {provisional.length} stop{provisional.length === 1 ? "" : "s"} ·
+            reach <b>{Math.round(baseline.reachPct * 100)}%</b> →{" "}
+            <b style={{ color: "var(--rs-red)" }}>
+              {Math.round(result.reachPct * 100)}%
+            </b>
+            {reachDeltaPts > 0 && (
+              <span style={{ color: "var(--rs-ink-3)" }}>
+                {" "}
+                (+{reachDeltaPts}pts)
               </span>
-            </>
-          ) : (
-            <>
-              <span className="mono text-blue">
-                REVISED ✓ +{provisional.length} STOP
-                {provisional.length === 1 ? "" : "S"}
+            )}
+            {addedMiles > 0 && (
+              <span style={{ color: "var(--rs-ink-3)" }}>
+                {" "}
+                · +{addedMiles.toLocaleString()} mi
               </span>
-              <span className="mono text-ink/70">
-                REACH {Math.round(baseline.reachPct * 100)}% →{" "}
-                <span className="text-red">
-                  {Math.round(result.reachPct * 100)}%
-                </span>
-                {reachDeltaPts > 0 && (
-                  <span className="text-ink/45"> (+{reachDeltaPts}pts)</span>
-                )}
-              </span>
-              {addedMiles > 0 && (
-                <span className="mono text-ink/45">
-                  +{addedMiles.toLocaleString()} MI
-                </span>
-              )}
-              <button
-                onClick={buildRevised}
-                className="mono text-ink/50 underline hover:text-ink"
-                title="Recompute at the current radius"
-              >
-                REBUILD @ {radiusMiles}MI
-              </button>
-              <button
-                onClick={resetRevised}
-                className="mono text-ink/50 underline hover:text-red"
-              >
-                RESET
-              </button>
-            </>
-          )}
+            )}
+          </span>
+          <button
+            className="rs-btn ghost"
+            onClick={buildRevised}
+            title="Recompute at the current radius"
+          >
+            Rebuild @ {radiusMiles}mi
+          </button>
+          <button className="rs-btn ghost" onClick={resetRevised}>
+            Reset
+          </button>
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
+      <div className="rs-grid">
         {/* THE SPINE */}
-        <div className="relative">
+        <div className="rs-tl">
           {shows.map((show, i) => {
             const next = shows[i + 1];
             const pairKey = next
@@ -869,6 +871,7 @@ function RoutingSheet({
                   show={show}
                   index={i}
                   radiusMiles={radiusMiles}
+                  maxReach={maxReach}
                   provisional={provisionalKeys.has(
                     `${show.event.date}|${show.event.city}`,
                   )}
@@ -901,7 +904,7 @@ function RoutingSheet({
         </div>
 
         {/* MAP — spatial twin */}
-        <div>
+        <div className="rs-mappane">
           <TourMap
             stops={result.mapData.stops}
             customerPoints={result.mapData.customerPoints}
@@ -912,41 +915,22 @@ function RoutingSheet({
             onSelectStop={() => setSelectedLeg(null)}
             onSelectLeg={(i) => setSelectedLeg(selectedLeg === i ? null : i)}
           />
-          <div className="mono text-ink/35 text-xs mt-1 flex flex-wrap gap-x-4">
-            <span>
-              <span className="text-red">●</span> TOUR STOP
+          <div className="rs-maplegend">
+            <span className="lg">
+              <span style={{ color: "var(--rs-red)" }}>●</span> Booked
             </span>
-            <span>
-              <span className="text-blue">◇</span> FILL CANDIDATE
+            <span className="lg">
+              <span style={{ color: "var(--rs-blue)" }}>◇</span> Fill candidate
             </span>
-            <span>FAN DENSITY · cold→hot</span>
+            <span className="lg">Fan density · cold→hot</span>
             {selectedLeg !== null && result.legs[selectedLeg] && (
-              <span className="text-ink/55">
-                SELECTED · {result.legs[selectedLeg].fromCity} →{" "}
+              <span className="lg" style={{ color: "var(--rs-ink-2)" }}>
+                Selected · {result.legs[selectedLeg].fromCity} →{" "}
                 {result.legs[selectedLeg].toCity}
               </span>
             )}
           </div>
         </div>
-      </div>
-
-      {/* Sticky radius lens */}
-      <div className="sticky bottom-0 bg-cream/95 backdrop-blur border-t border-ink/15 mt-5 py-3 flex items-center gap-4">
-        <span className="mono text-ink/55 shrink-0">
-          RADIUS · {radiusMiles}MI
-        </span>
-        <input
-          type="range"
-          min={25}
-          max={250}
-          step={5}
-          value={radiusMiles}
-          onChange={(e) => setRadiusMiles(parseInt(e.target.value, 10))}
-          className="flex-1 accent-red"
-        />
-        <span className="mono text-ink/35 shrink-0 hidden sm:inline">
-          recounts reach · widens fill corridor
-        </span>
       </div>
 
       {/* Untapped shelf + verdict */}
@@ -962,7 +946,7 @@ function RoutingSheet({
         onApplyStops={applyAgentStops}
       />
 
-      <div className="mt-4 serif-italic text-ink/45 text-xs">
+      <div className="rs-foot">
         Straight-line (great-circle) miles from city centers — close enough to
         rank routing. Customers without a recognizable US city aren&apos;t
         plotted.
@@ -976,6 +960,7 @@ function ShowRow({
   show,
   index,
   radiusMiles,
+  maxReach,
   provisional,
   selected,
   onRemove,
@@ -984,6 +969,7 @@ function ShowRow({
   show: CustomerCrossover["perEvent"][number];
   index: number;
   radiusMiles: number;
+  maxReach: number;
   provisional: boolean;
   selected: boolean;
   onRemove?: () => void;
@@ -992,119 +978,108 @@ function ShowRow({
   const [whoOpen, setWhoOpen] = useState(false);
   const useRadius = show.lat !== undefined && show.lng !== undefined;
   const count = useRadius ? show.withinRadiusCount : show.sameStateCount;
-  const offFanbase = useRadius && show.withinRadiusCount === 0;
   const nearby = show.nearby ?? [];
   const inCity = nearby.find((n) => n.isSameCity);
   const secondary = nearby.filter((n) => !n.isSameCity);
   const hasWho = nearby.length > 0;
+  const nearbyCount = Math.max(0, show.withinRadiusCount - show.sameCityCount);
+
+  // Date split into weekday + month-day, parsed at noon to dodge the UTC
+  // off-by-one (same trick fmtDay uses).
+  const dt = new Date(`${show.event.date}T12:00:00`);
+  const valid = !isNaN(dt.getTime());
+  const dow = valid ? dt.toLocaleDateString("en-US", { weekday: "short" }) : "";
+  const dm = valid
+    ? dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : show.event.date;
+
+  // Reach bar — width relative to the densest stop, color by quality tier.
+  const ratio = maxReach > 0 ? count / maxReach : 0;
+  const tier = ratio >= 0.6 ? "hi" : count > 0 ? "mid" : "lo";
+  const barW = count > 0 ? Math.max(6, Math.round(ratio * 100)) : 0;
+  const dim = count === 0 || ratio < 0.18;
 
   return (
-    <div className="relative pl-10 py-2.5" onClick={onSelect}>
-      {/* rail */}
-      <div className="absolute left-[1.05rem] inset-y-0 w-px bg-ink/15" />
-      <span
-        className="absolute left-[0.55rem] top-3 w-3 h-3 rounded-full border-2"
-        style={{
-          background: provisional
-            ? "#F4EFE6"
-            : selected
-              ? "#F23222"
-              : "#0A0A0A",
-          borderColor: provisional ? "#1E2DDB" : "#F23222",
-          borderStyle: provisional ? "dashed" : "solid",
-        }}
-      />
-      <div className="flex items-baseline gap-3">
-        <span className="mono text-ink/55 shrink-0 w-28">
-          {fmtDay(show.event.date)}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="font-medium truncate">
+    <>
+      <div className={`rs-stop${selected ? " sel" : ""}`} onClick={onSelect}>
+        <span className={`rs-node${provisional ? " add" : ""}`} />
+        <div className="rs-date">
+          <div className="dow">{dow}</div>
+          <div className="dm">{dm}</div>
+        </div>
+        <div className="rs-body">
+          <div className="rs-venue">
             {show.event.venue === "PROVISIONAL" ? (
-              // Sequence index keeps the ordinal context that "PROVISIONAL"
-              // (now ADDITIVE) buried in the spine. Blue, mono, prefixed with
-              // the run-order ordinal so a glance reads "this is stop 04 and
-              // it's one I added on top of the booked dates."
-              <span className="text-blue mono">
-                ADDITIVE TOUR DATE · #{String(index + 1).padStart(2, "0")}
+              <span className="add-tag">
+                Additive · #{String(index + 1).padStart(2, "0")}
               </span>
             ) : (
               show.event.venue || "Venue TBD"
             )}
           </div>
+          <div className="rs-city">
+            {show.event.city || "?"}
+            {show.stateCode ? `, ${show.stateCode}` : ""}
+            {hasWho && (
+              <button
+                className={`rs-who${whoOpen ? " on" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setWhoOpen((v) => !v);
+                }}
+              >
+                {whoOpen ? "▾ who" : "▸ who"}
+              </button>
+            )}
+            {onRemove && (
+              <button
+                className="rs-remove"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove();
+                }}
+                title="Remove this additive date"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
-        <span className="mono text-ink/60 shrink-0 text-right">
-          {(show.event.city || "?").toUpperCase()}
-        </span>
-        {onRemove && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-            className="mono text-ink/40 hover:text-red shrink-0"
-            title="Remove this additive date"
-          >
-            ✕
-          </button>
-        )}
-      </div>
-      {/* fan chip */}
-      <div className="ml-[7.75rem] mt-0.5 flex items-center gap-2 mono text-xs">
-        <FanChip
-          count={count}
-          radiusMiles={radiusMiles}
-          useRadius={useRadius}
-          stateCode={show.stateCode}
-        />
-        {show.sameCityCount > 0 && (
-          <span className="text-red">★ {show.sameCityCount} IN CITY</span>
-        )}
-        {/* NEARBY = within the radius but NOT same-city. Surfaces the
-            customers a venue could still reach via a regional fan base
-            (drive-in, suburb spillover) even when the venue's literal city
-            is fan-light. Renders only when there's a meaningful delta. */}
-        {useRadius && show.withinRadiusCount - show.sameCityCount > 0 && (
-          <span className="text-blue">
-            ◌ {(show.withinRadiusCount - show.sameCityCount).toLocaleString()}{" "}
-            NEARBY
-          </span>
-        )}
-        {offFanbase && <span className="text-ink/40">⚑ OFF FANBASE</span>}
-        {hasWho && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setWhoOpen((v) => !v);
-            }}
-            className="text-ink/45 hover:text-ink"
-          >
-            {whoOpen ? "▾ WHO" : "▸ WHO"}
-          </button>
-        )}
+        <div className="rs-reach">
+          <div className={`n${dim ? " dim" : ""}`}>
+            {count.toLocaleString()}
+          </div>
+          <div className="u">
+            {count === 0
+              ? "off fanbase"
+              : useRadius
+                ? `fans · ${radiusMiles}mi`
+                : `fans · ${show.stateCode ?? ""}`}
+          </div>
+          <div className="rs-bar">
+            <i className={tier} style={{ width: `${barW}%` }} />
+          </div>
+        </div>
       </div>
 
-      {/* who — actual customers within radius, grouped by city */}
+      {/* who — in-city/nearby split + actual names, revealed on demand */}
       {whoOpen && hasWho && (
-        <div className="ml-[7.75rem] mt-1.5 space-y-1.5">
-          {inCity && <NearbyCity group={inCity} accent />}
-          {secondary.length > 0 && (
-            <div className="space-y-1">
-              <div className="mono text-ink/40 text-[0.65rem]">
-                NEARBY ≤{radiusMiles}MI
-              </div>
-              {secondary.map((g, i) => (
-                <NearbyCity key={i} group={g} />
-              ))}
-            </div>
-          )}
+        <div className="rs-whobox">
+          <div className="rs-fhead">
+            ★ {show.sameCityCount} in city · ◌ {nearbyCount} nearby ≤
+            {radiusMiles}mi
+          </div>
+          {inCity && <WhoRow group={inCity} accent />}
+          {secondary.map((g, i) => (
+            <WhoRow key={i} group={g} />
+          ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
-function NearbyCity({
+function WhoRow({
   group,
   accent,
 }: {
@@ -1118,39 +1093,19 @@ function NearbyCity({
 }) {
   const extra = group.count - group.names.length;
   return (
-    <div className="text-xs leading-snug">
-      <span className={`mono ${accent ? "text-red" : "text-ink/55"}`}>
+    <div className="rs-whorow">
+      <span className={`c ${accent ? "accent" : "sec"}`}>
         {accent ? "★ " : ""}
-        {group.city.toUpperCase()}, {group.stateCode} ({group.count})
+        {group.city}, {group.stateCode} ({group.count})
       </span>{" "}
-      <span className="text-ink/70">
+      <span className="nm">
         {group.names.join(" · ")}
-        {extra > 0 && <span className="text-ink/40"> +{extra} more</span>}
+        {extra > 0 && <span className="rs-whomore"> +{extra} more</span>}
         {group.names.length === 0 && (
-          <span className="text-ink/40">(names not in file)</span>
+          <span className="rs-whomore">(names not in file)</span>
         )}
       </span>
     </div>
-  );
-}
-
-function FanChip({
-  count,
-  radiusMiles,
-  useRadius,
-  stateCode,
-}: {
-  count: number;
-  radiusMiles: number;
-  useRadius: boolean;
-  stateCode: string | null;
-}) {
-  const blocks = count === 0 ? "░░" : count < 15 ? "▓░" : "▓▓";
-  return (
-    <span className="text-ink/55">
-      <span className={count > 0 ? "text-ink" : "text-ink/25"}>{blocks}</span>{" "}
-      {count} {useRadius ? `≤${radiusMiles}MI` : `IN ${stateCode ?? "?"}`}
-    </span>
   );
 }
 
@@ -1172,60 +1127,65 @@ function LegConnector({
 }) {
   const d = legDisplay(leg);
   const hasFills = leg.suggestions.length > 0;
+  // Tick grows with idle days so a long dead gap reads as a taller red mark.
+  const tickH = Math.min(46, 10 + leg.gapDays);
+  const modeWord = d.fly
+    ? "fly"
+    : d.verdict === "DRIVE HARD"
+      ? "long haul"
+      : "drive";
   return (
-    <div className="relative pl-10">
-      {/* rail segment */}
-      <div
-        className={`absolute left-[1.05rem] -translate-x-1/2 inset-y-0 ${d.railWidth} ${d.railColor}`}
-      />
-      <button
-        onClick={onToggle}
-        className={`w-full text-left py-1.5 flex items-center gap-2 mono text-xs ${d.color} ${
-          hasFills ? "hover:opacity-70" : "cursor-default"
-        }`}
-        disabled={!hasFills}
-      >
-        <span className="tracking-tight">
-          {d.dark ? "⚑ " : ""}
-          {leg.segmentMiles.toLocaleString()} MI
+    <div className={`rs-leg${d.dark ? " warn" : ""}`}>
+      <div className="tick">
+        <span style={{ height: `${tickH}px` }} />
+      </div>
+      <div className="lwrap">
+        <button
+          className="mi"
+          onClick={onToggle}
+          disabled={!hasFills}
+          style={hasFills ? undefined : { cursor: "default" }}
+        >
+          ↓ {leg.segmentMiles.toLocaleString()} mi
+        </button>
+        <span className="dur">
+          {leg.gapDays} day{leg.gapDays === 1 ? "" : "s"}
+          {d.dark ? " idle" : ""}
         </span>
-        <span className="text-ink/30">{"▌".repeat(d.slack)}</span>
-        <span>
-          · {leg.gapDays} DAY{leg.gapDays === 1 ? "" : "S"} · {d.verdict}
-        </span>
+        <span className="mode-w">{modeWord}</span>
         {hasFills && (
-          <span className="ml-auto text-ink/45">
-            {open ? "▾" : "▸"} FILL ({leg.suggestions.length})
-          </span>
+          <button className="fill" onClick={onToggle}>
+            {leg.suggestions.length} fan{" "}
+            {leg.suggestions.length === 1 ? "city" : "cities"} on route{" "}
+            {open ? "▾" : "▸"}
+          </button>
         )}
-      </button>
+      </div>
 
       {open && hasFills && (
-        <div className="ml-2 mb-2 border-l-2 border-blue/40 pl-3 space-y-1">
-          <div className="mono text-ink/45 text-xs">
-            FILL THIS GAP · ON-ROUTE FAN CITIES
+        <div className="rs-fills">
+          <div className="rs-fhead">
+            Fill this gap · densest cities on route
           </div>
           {leg.suggestions.map((s, i) => {
             const accepted = acceptedKeys.has(`${s.suggestedDate}|${s.city}`);
             return (
-              <div key={i} className="flex items-baseline gap-2 text-sm">
+              <div key={i} className="rs-fillrow">
                 <button
+                  className="add"
                   onClick={() => onAccept(s)}
                   disabled={accepted}
-                  className={`mono shrink-0 ${
-                    accepted ? "text-ink/30" : "text-blue hover:text-red"
-                  }`}
                   title={accepted ? "Added" : "Add as additive tour date"}
                 >
                   {accepted ? "✓" : "⊕"}
                 </button>
-                <span className="font-medium flex-1">
+                <span className="fcity">
                   {s.city}, {s.stateCode}
                 </span>
-                <span className="display text-base">{s.customers}</span>
-                <span className="mono text-ink/40 text-xs w-28 text-right">
-                  +{s.detourMiles}MI · ~{s.suggestedDate.slice(5)}
+                <span className="fmeta">
+                  +{s.detourMiles}mi · ~{s.suggestedDate.slice(5)}
                 </span>
+                <span className="ffans">{s.customers}</span>
               </div>
             );
           })}

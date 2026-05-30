@@ -68,18 +68,24 @@ export default function CustomerGlobe({
     if (aggregate.length === 0) return [];
     const maxCount = aggregate[0]?.count ?? 1;
     const top5 = new Set(aggregate.slice(0, 5).map((a) => a.city));
-    return aggregate.map((a) => ({
-      lat: a.lat,
-      lng: a.lng,
-      count: a.count,
-      city: a.city,
-      stateCode: a.stateCode,
-      // altitude: 0 (ground) → 0.4 (top) scaled by sqrt(count)
-      altitude: Math.min(0.5, Math.sqrt(a.count / maxCount) * 0.5),
-      // radius: 0.15 → 1.2 sqrt-scaled
-      radius: Math.max(0.15, Math.sqrt(a.count / maxCount) * 1.2),
-      color: top5.has(a.city) ? LIME : RED,
-    }));
+    return aggregate.map((a) => {
+      const t = Math.sqrt(a.count / maxCount); // 0..1, softened
+      return {
+        lat: a.lat,
+        lng: a.lng,
+        count: a.count,
+        city: a.city,
+        stateCode: a.stateCode,
+        // altitude is in GLOBE-RADII — the default is 0.1, so anything near
+        // 0.5 turns dots into planet-sized spikes. Keep it a low surface lift
+        // (≤0.07) so cities read as dots with a subtle "taller = more fans"
+        // pop, not porcupine quills.
+        altitude: 0.004 + t * 0.06,
+        // radius in angular degrees; tight range so dense metros don't blob.
+        radius: 0.18 + t * 0.34,
+        color: top5.has(a.city) ? LIME : RED,
+      };
+    });
   }, [aggregate]);
 
   // Auto-rotate + camera setup. Runs after globe init. Listens to
@@ -103,7 +109,10 @@ export default function CustomerGlobe({
   }, [autoRotate]);
 
   return (
-    <div ref={containerRef} className="w-full h-[560px] bg-ink relative">
+    <div
+      ref={containerRef}
+      className="w-full h-full min-h-[520px] bg-ink relative"
+    >
       <Globe
         ref={globeRef}
         width={size.width}

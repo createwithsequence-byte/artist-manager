@@ -378,16 +378,20 @@ export default function CustomersPage() {
 
           {/* The viz itself. Mounted-and-frozen pattern: switching VIEW unmounts
               the other to keep memory clean (three.js scenes don't free on
-              their own). Globe gets full bleed (dark bg), flat gets a border. */}
-          {view === "globe" ? (
-            <CustomerGlobe
-              aggregate={stage.aggregate}
-              mode={globeMode}
-              autoRotate
-            />
-          ) : (
-            <CustomerFlatMap aggregate={stage.aggregate} />
-          )}
+              their own). Globe gets full bleed (dark bg), flat gets a border.
+              flex-1 + min-h-0 lets the globe fill the viewport instead of
+              floating in a fixed box with dead cream space below. */}
+          <div className="flex-1 min-h-[68vh] flex flex-col">
+            {view === "globe" ? (
+              <CustomerGlobe
+                aggregate={stage.aggregate}
+                mode={globeMode}
+                autoRotate
+              />
+            ) : (
+              <CustomerFlatMap aggregate={stage.aggregate} />
+            )}
+          </div>
 
           {/* Top-cities sidebar strip — bottom of the page. Mono caps mirror
               the artist roster's rhythm. */}

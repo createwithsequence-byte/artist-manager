@@ -1,0 +1,1636 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Routing Sheet v2 — clean</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&family=Lora:ital@1&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        /* warm white — clean, not clinical */
+        --canvas: #fcfcfa;
+        --surface: #ffffff;
+        --line: #ecece8;
+        --line-strong: #e0e0da;
+        --ink: #1a1a18;
+        --ink-2: #5c5c56;
+        --ink-3: #9b9b94;
+        --ink-4: #c2c2ba;
+        --red: #f23222;
+        --blue: #1e2ddb;
+        --lime: #c9f33a;
+        --lime-ink: #5d7a00;
+        --red-wash: #fdedeb;
+        --blue-wash: #ecedfb;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html {
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+      body {
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: Inter, system-ui, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
+        padding: 40px 32px 80px;
+      }
+      .wrap {
+        max-width: 1240px;
+        margin: 0 auto;
+      }
+
+      /* ── micro type helpers ─────────────────────────────── */
+      .mono {
+        font-family: "JetBrains Mono", monospace;
+        font-feature-settings: "tnum";
+      }
+      .label {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      .serif {
+        font-family: Lora, Georgia, serif;
+        font-style: italic;
+      }
+      .display {
+        font-family: "Big Shoulders Display", sans-serif;
+        line-height: 0.9;
+      }
+      .tnum {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── header ─────────────────────────────────────────── */
+      header {
+        display: flex;
+        align-items: flex-end;
+        gap: 16px;
+        margin-bottom: 6px;
+      }
+      .h-name {
+        font-family: "Big Shoulders Display", sans-serif;
+        font-weight: 700;
+        font-size: 34px;
+        letter-spacing: 0.01em;
+        line-height: 0.85;
+      }
+      .h-kicker {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-bottom: 7px;
+      }
+      .master {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--lime-ink);
+      }
+      .master .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--lime);
+        box-shadow: 0 0 0 2px #eaf6c2;
+      }
+      .replace {
+        margin-left: auto;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        text-decoration: none;
+        border-bottom: 1px solid var(--line-strong);
+        padding-bottom: 1px;
+        cursor: pointer;
+      }
+      .replace:hover {
+        color: var(--red);
+        border-color: var(--red);
+      }
+
+      /* ── stat ribbon ────────────────────────────────────── */
+      .ribbon {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        margin: 18px 0 14px;
+      }
+      .stat {
+        padding: 11px 18px;
+        border-right: 1px solid var(--line);
+        min-width: 0;
+      }
+      .stat:last-child {
+        border-right: 0;
+      }
+      .stat .k {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-bottom: 3px;
+        white-space: nowrap;
+      }
+      .stat .v {
+        font-size: 15px;
+        font-weight: 550;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      .stat .v small {
+        font-weight: 450;
+        color: var(--ink-2);
+        font-size: 12px;
+      }
+      .stat.flag {
+        background: var(--red-wash);
+      }
+      .stat.flag .v {
+        color: var(--red);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .cov-bar {
+        width: 46px;
+        height: 5px;
+        background: #f3cdc8;
+        border-radius: 3px;
+        overflow: hidden;
+        display: inline-block;
+      }
+      .cov-bar i {
+        display: block;
+        height: 100%;
+        width: 4%;
+        background: var(--red);
+      }
+
+      /* clever insight line */
+      .insight {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        border-left: 2px solid var(--blue);
+        background: var(--surface);
+        margin-bottom: 22px;
+        font-size: 13.5px;
+      }
+      .insight .serif {
+        color: var(--ink-2);
+      }
+      .insight b {
+        font-weight: 600;
+      }
+      .insight .go {
+        margin-left: auto;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #fff;
+        background: var(--blue);
+        padding: 7px 12px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .insight .go:hover {
+        background: var(--ink);
+      }
+
+      /* ── mode toggle ────────────────────────────────────── */
+      .modebar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 26px;
+      }
+      .seg {
+        display: inline-flex;
+        border: 1px solid var(--line-strong);
+        background: var(--surface);
+        border-radius: 7px;
+        overflow: hidden;
+        padding: 3px;
+        gap: 2px;
+      }
+      .seg button {
+        font-family: Inter, sans-serif;
+        font-size: 12.5px;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+        color: var(--ink-2);
+        background: transparent;
+        border: 0;
+        padding: 6px 14px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .seg button[aria-checked="true"] {
+        background: var(--ink);
+        color: #fff;
+      }
+      .modebar .hint {
+        font-family: Lora, serif;
+        font-style: italic;
+        color: var(--ink-3);
+        font-size: 13px;
+      }
+      /* radius lens — global control: every fan number answers to it */
+      .lens {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .lens-k {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      .lens input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 120px;
+        height: 3px;
+        background: var(--line-strong);
+        border-radius: 3px;
+        outline: none;
+      }
+      .lens input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--ink);
+        cursor: pointer;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 1px var(--line-strong);
+      }
+      .lens input[type="range"]::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--ink);
+        cursor: pointer;
+        border: 2px solid #fff;
+      }
+      .lens-v {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--ink);
+        min-width: 44px;
+      }
+
+      /* ── two-pane layout ────────────────────────────────── */
+      .grid {
+        display: grid;
+        grid-template-columns: 1.18fr 0.82fr;
+        gap: 30px;
+        align-items: start;
+      }
+
+      /* ── timeline ───────────────────────────────────────── */
+      .tl {
+        position: relative;
+      }
+      .tl::before {
+        content: "";
+        position: absolute;
+        left: 78px;
+        top: 14px;
+        bottom: 14px;
+        width: 1px;
+        background: var(--line-strong);
+      }
+
+      .stop {
+        position: relative;
+        display: grid;
+        grid-template-columns: 64px 1fr auto;
+        gap: 18px;
+        align-items: center;
+        padding: 14px 0;
+      }
+      .date {
+        justify-self: end;
+        text-align: right;
+        line-height: 1.15;
+      }
+      .date .dow {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
+        color: var(--ink-3);
+        text-transform: uppercase;
+      }
+      .date .dm {
+        font-size: 13px;
+        font-weight: 550;
+        letter-spacing: -0.01em;
+        color: var(--ink-2);
+      }
+
+      .node {
+        position: absolute;
+        left: 74px;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #fff;
+        border: 2.5px solid var(--red);
+        z-index: 2;
+      }
+      .node.add {
+        border-color: var(--blue);
+        border-style: solid;
+      }
+      .node.add::after {
+        content: "";
+        position: absolute;
+        inset: 1.5px;
+        border-radius: 50%;
+        background: var(--blue);
+      }
+
+      .body {
+        min-width: 0;
+        padding-left: 8px;
+      }
+      .venue {
+        font-size: 16px;
+        font-weight: 550;
+        letter-spacing: -0.01em;
+        color: var(--ink);
+        line-height: 1.25;
+      }
+      .venue .add-tag {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--blue);
+        background: var(--blue-wash);
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-right: 8px;
+        vertical-align: 1.5px;
+      }
+      .city {
+        font-size: 12.5px;
+        color: var(--ink-3);
+        margin-top: 2px;
+      }
+      .city .who {
+        margin-left: 9px;
+        color: var(--ink-4);
+        cursor: pointer;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        opacity: 0;
+        transition: opacity 0.12s;
+      }
+      .stop:hover .who {
+        opacity: 1;
+      }
+      .city .who:hover {
+        color: var(--ink);
+      }
+
+      /* reach signal */
+      .reach {
+        justify-self: end;
+        text-align: right;
+        min-width: 96px;
+      }
+      .reach .n {
+        font-family: "Big Shoulders Display", sans-serif;
+        font-weight: 600;
+        font-size: 23px;
+        line-height: 0.8;
+        letter-spacing: 0.01em;
+        color: var(--ink);
+      }
+      .reach .n.dim {
+        color: var(--ink-3);
+      }
+      .reach .u {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-top: 3px;
+      }
+      .bar {
+        width: 84px;
+        height: 4px;
+        background: #efefe9;
+        border-radius: 3px;
+        overflow: hidden;
+        margin: 6px 0 0 auto;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+      }
+      .bar i.lo {
+        background: var(--ink-4);
+      }
+      .bar i.mid {
+        background: var(--red);
+      }
+      .bar i.hi {
+        background: var(--lime);
+      }
+      .micro {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.04em;
+        color: var(--ink-4);
+        margin-top: 5px;
+        text-transform: uppercase;
+      }
+      .micro .star {
+        color: var(--red);
+      }
+
+      /* leg connector — subordinate */
+      .leg {
+        position: relative;
+        display: grid;
+        grid-template-columns: 64px 1fr;
+        gap: 18px;
+        padding: 3px 0 3px 0;
+      }
+      .leg .lwrap {
+        grid-column: 2;
+        padding-left: 8px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .leg .seg-mi {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--ink-3);
+        letter-spacing: 0.03em;
+      }
+      .leg .dur {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--ink-4);
+        letter-spacing: 0.03em;
+      }
+      .leg .mode-w {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-4);
+        border: 1px solid var(--line-strong);
+        padding: 1px 6px;
+        border-radius: 3px;
+      }
+      .leg.warn .seg-mi {
+        color: var(--red);
+      }
+      .leg .fill {
+        margin-left: auto;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--blue);
+        cursor: pointer;
+        border-bottom: 1px dashed transparent;
+      }
+      .leg .fill:hover {
+        border-color: var(--blue);
+      }
+      /* rail tick for idle gap severity */
+      .leg .tick {
+        position: absolute;
+        left: 74px;
+        width: 11px;
+        display: flex;
+        justify-content: center;
+      }
+      .leg .tick span {
+        width: 3px;
+        border-radius: 2px;
+        background: var(--line-strong);
+      }
+      .leg.warn .tick span {
+        background: var(--red);
+      }
+
+      /* expanded fill list */
+      .fills {
+        grid-column: 2;
+        padding: 6px 0 8px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .fillrow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 7px 11px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .fillrow:hover {
+        border-color: var(--blue);
+        background: var(--blue-wash);
+      }
+      .fillrow .fdot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        border: 1.5px solid var(--blue);
+      }
+      .fillrow .fcity {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .fillrow .fmeta {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10.5px;
+        color: var(--ink-3);
+        margin-left: auto;
+        letter-spacing: 0.03em;
+      }
+      .fillrow .fadd {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 14px;
+        color: var(--blue);
+        cursor: pointer;
+        line-height: 1;
+      }
+      .fills .fhead {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        padding: 2px 0 4px;
+      }
+
+      /* ── TOUR HERE pane ─────────────────────────────────── */
+      .thcard {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        padding: 16px;
+        margin-bottom: 18px;
+      }
+      .throw {
+        display: flex;
+        align-items: flex-end;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .thfield {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .thk {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      .thin {
+        font-family: Inter, sans-serif;
+        font-size: 13px;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        padding: 7px 9px;
+        width: 92px;
+        background: #fff;
+        color: var(--ink);
+      }
+      .thin:focus {
+        outline: none;
+        border-color: var(--ink);
+      }
+      .thseg {
+        display: inline-flex;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .thseg button {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        border: 0;
+        border-right: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink-2);
+        padding: 8px 10px;
+        cursor: pointer;
+      }
+      .thseg button:last-child {
+        border-right: 0;
+      }
+      .thseg button.sel {
+        background: var(--ink);
+        color: #fff;
+      }
+      .thgo {
+        margin-left: auto;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #fff;
+        background: var(--blue);
+        border: 0;
+        padding: 9px 14px;
+        border-radius: 5px;
+        cursor: pointer;
+        align-self: flex-end;
+      }
+      .thgo:hover {
+        background: var(--ink);
+      }
+      .thhead {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 2px 10px;
+        flex-wrap: wrap;
+      }
+      .thstat {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--ink);
+        letter-spacing: 0.02em;
+      }
+      .thactions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+      }
+      .thapply,
+      .thexport {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        border: 1px solid var(--line-strong);
+        background: #fff;
+        color: var(--ink);
+        padding: 7px 11px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .thapply {
+        background: var(--blue);
+        color: #fff;
+        border-color: var(--blue);
+      }
+      .thapply:hover {
+        background: var(--ink);
+        border-color: var(--ink);
+      }
+      .thexport:hover {
+        border-color: var(--ink);
+      }
+      .thlist {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .throw2 {
+        display: grid;
+        grid-template-columns: 14px 24px 56px 1fr auto auto;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 12px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        position: relative;
+      }
+      .throw2:hover {
+        border-color: var(--blue);
+        background: var(--blue-wash);
+      }
+      .thnode {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 2px solid var(--blue);
+        background: #fff;
+        position: relative;
+      }
+      .thnode::after {
+        content: "";
+        position: absolute;
+        inset: 1.5px;
+        border-radius: 50%;
+        background: var(--blue);
+      }
+      .thidx {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--ink-3);
+      }
+      .thdate {
+        font-size: 12px;
+        color: var(--ink-2);
+      }
+      .thcity {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--ink);
+      }
+      .thcity .st {
+        color: var(--ink-3);
+        font-weight: 400;
+      }
+      .thtag {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--blue);
+        background: var(--blue-wash);
+        padding: 2px 7px;
+        border-radius: 3px;
+      }
+      .thfans {
+        font-family: "Big Shoulders Display", sans-serif;
+        font-weight: 600;
+        font-size: 18px;
+        color: var(--ink);
+      }
+      .thmore {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        padding: 9px 2px 0;
+      }
+
+      /* ── map pane ───────────────────────────────────────── */
+      .mappane {
+        position: sticky;
+        top: 24px;
+      }
+      .mapcard {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        overflow: hidden;
+      }
+      .maptop {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .maptop .label {
+        margin-right: auto;
+      }
+      .togg {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+      .switch {
+        width: 30px;
+        height: 17px;
+        border-radius: 10px;
+        background: #e3e3dd;
+        position: relative;
+        transition: background 0.15s;
+      }
+      .switch i {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+        transition: transform 0.15s;
+      }
+      .togg.on .switch {
+        background: var(--ink);
+      }
+      .togg.on .switch i {
+        transform: translateX(13px);
+      }
+      .togg .t {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-2);
+      }
+      .tiles {
+        display: inline-flex;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      .tiles button {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        border: 0;
+        background: #fff;
+        color: var(--ink-3);
+        padding: 4px 7px;
+        cursor: pointer;
+        border-right: 1px solid var(--line);
+      }
+      .tiles button:last-child {
+        border-right: 0;
+      }
+      .tiles button.sel {
+        background: var(--ink);
+        color: #fff;
+      }
+
+      .mapview {
+        position: relative;
+        height: 420px;
+        background: radial-gradient(circle at 30% 40%, #fafaf7, #f4f4f0);
+      }
+      .mapview svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .usoutline {
+        fill: #f0f0ea;
+        stroke: #e2e2db;
+        stroke-width: 1;
+      }
+      .route {
+        fill: none;
+        stroke: var(--ink);
+        stroke-width: 1.5;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+        opacity: 0.85;
+      }
+      .route.leg-sel {
+        stroke: var(--red);
+        stroke-width: 2.5;
+      }
+      .pin {
+        cursor: pointer;
+      }
+      .pin circle {
+        stroke: #fff;
+        stroke-width: 1.5;
+      }
+      .pin.booked circle {
+        fill: var(--red);
+      }
+      .pin.add circle {
+        fill: #fff;
+        stroke: var(--blue);
+        stroke-width: 2;
+        stroke-dasharray: 2.5 2;
+      }
+      .pin text {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        font-weight: 600;
+        fill: #fff;
+        text-anchor: middle;
+        dominant-baseline: central;
+      }
+      .pin.add text {
+        fill: var(--blue);
+      }
+      .maplegend {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 9px 12px;
+        border-top: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      .lg {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+      }
+      .lg .s {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+      }
+      .lg .s.r {
+        background: var(--red);
+      }
+      .lg .s.b {
+        background: #fff;
+        border: 2px solid var(--blue);
+      }
+      .lg .s.line {
+        width: 16px;
+        height: 2px;
+        border-radius: 0;
+        background: var(--ink);
+      }
+
+      .footnote {
+        font-family: Lora, serif;
+        font-style: italic;
+        color: var(--ink-3);
+        font-size: 12px;
+        margin-top: 14px;
+        max-width: 40ch;
+      }
+
+      /* ── tour agent dock ────────────────────────────────── */
+      .agent {
+        margin-top: 16px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+      }
+      .agent-head {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        width: 100%;
+        text-align: left;
+        border: 0;
+        background: transparent;
+        padding: 11px 13px;
+        cursor: pointer;
+      }
+      .agent-spark {
+        color: var(--blue);
+        font-size: 13px;
+      }
+      .agent-title {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink);
+      }
+      .agent-sub {
+        font-size: 12px;
+        color: var(--ink-3);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .agent-chev {
+        margin-left: auto;
+        color: var(--ink-3);
+        transition: transform 0.15s;
+      }
+      .agent.open .agent-chev {
+        transform: rotate(90deg);
+      }
+      .agent-body {
+        display: none;
+        padding: 0 13px 13px;
+      }
+      .agent.open .agent-body {
+        display: block;
+      }
+      .agent-msg {
+        font-family: Lora, serif;
+        font-style: italic;
+        color: var(--ink-2);
+        font-size: 13px;
+        padding: 4px 0 11px;
+      }
+      .agent-input {
+        display: flex;
+        gap: 8px;
+      }
+      .agent-input input {
+        flex: 1;
+        font-family: Inter, sans-serif;
+        font-size: 13px;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        padding: 8px 10px;
+        background: #fff;
+      }
+      .agent-input input:focus {
+        outline: none;
+        border-color: var(--ink);
+      }
+      .agent-input button {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #fff;
+        background: var(--blue);
+        border: 0;
+        border-radius: 5px;
+        padding: 0 13px;
+        cursor: pointer;
+      }
+      .agent-input button:hover {
+        background: var(--ink);
+      }
+
+      .pill-note {
+        position: fixed;
+        bottom: 16px;
+        right: 16px;
+        background: var(--ink);
+        color: #fff;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.06em;
+        padding: 8px 12px;
+        text-transform: uppercase;
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <!-- HEADER -->
+      <header>
+        <div>
+          <div class="h-kicker">Routing Sheet</div>
+          <div class="h-name">JESSE LABELLE</div>
+        </div>
+        <span class="master" style="margin-bottom: 7px"
+          ><span class="dot"></span>SF Master · Jesse's Customers</span
+        >
+        <a class="replace">Replace</a>
+      </header>
+
+      <!-- STAT RIBBON -->
+      <div class="ribbon">
+        <div class="stat">
+          <div class="k">Dates</div>
+          <div class="v tnum">7</div>
+        </div>
+        <div class="stat">
+          <div class="k">Window</div>
+          <div class="v">May 29 <small>→</small> Sep 6</div>
+        </div>
+        <div class="stat">
+          <div class="k">Route</div>
+          <div class="v tnum">2,878 <small>mi</small></div>
+        </div>
+        <div class="stat">
+          <div class="k">Longest gap</div>
+          <div class="v tnum">42 <small>days</small></div>
+        </div>
+        <div class="stat flag">
+          <div class="k">Fan coverage</div>
+          <div class="v tnum">
+            4%<span class="cov-bar"><i></i></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- CLEVER INSIGHT -->
+      <div class="insight">
+        <span class="serif"
+          >Only <b>4%</b> of Jesse's fanbase is within reach.
+          <b>9 on-route cities</b> could lift that to roughly
+          <b style="color: var(--blue)">18%</b>.</span
+        >
+        <span class="go">Build revised tour →</span>
+      </div>
+
+      <!-- MODE TOGGLE + RADIUS LENS -->
+      <div class="modebar">
+        <div class="seg" role="radiogroup" aria-label="Routing mode">
+          <button aria-checked="true" data-mode="current">Current tour</button>
+          <button aria-checked="false" data-mode="tourhere">Tour here</button>
+        </div>
+        <span class="hint" id="modeHint">Fill the gaps in his booked run.</span>
+        <label class="lens" aria-label="Reach radius">
+          <span class="lens-k">Reach radius</span>
+          <input type="range" min="20" max="150" value="60" id="radius" />
+          <span class="lens-v tnum" id="radiusVal">60 mi</span>
+        </label>
+      </div>
+
+      <!-- TWO PANE -->
+      <div class="grid">
+        <!-- LEFT COLUMN: current timeline OR tour-here controls -->
+        <div class="leftcol">
+          <!-- TIMELINE (Current mode) -->
+          <div class="tl" id="pane-current">
+            <!-- stop 1 -->
+            <div class="stop">
+              <span class="node"></span>
+              <div class="date">
+                <div class="dow">Fri</div>
+                <div class="dm">May 29</div>
+              </div>
+              <div class="body">
+                <div class="venue">Just Love Coffee Cafe</div>
+                <div class="city">
+                  Spring Hill, TN <span class="who">▸ who</span>
+                </div>
+              </div>
+              <div class="reach">
+                <div class="n">29</div>
+                <div class="u">fans · 60mi</div>
+                <div class="bar"><i class="mid" style="width: 30%"></i></div>
+              </div>
+            </div>
+            <div class="leg">
+              <div class="tick"><span style="height: 14px"></span></div>
+              <div class="lwrap">
+                <span class="seg-mi">↓ 32 mi</span><span class="dur">1 day</span
+                ><span class="mode-w">drive</span>
+              </div>
+            </div>
+
+            <!-- stop 2 -->
+            <div class="stop">
+              <span class="node"></span>
+              <div class="date">
+                <div class="dow">Sat</div>
+                <div class="dm">May 30</div>
+              </div>
+              <div class="body">
+                <div class="venue">Museum of Christian &amp; Gospel Music</div>
+                <div class="city">
+                  Nashville, TN <span class="who">▸ who</span>
+                </div>
+              </div>
+              <div class="reach">
+                <div class="n">31</div>
+                <div class="u">fans · 60mi</div>
+                <div class="bar"><i class="mid" style="width: 33%"></i></div>
+              </div>
+            </div>
+
+            <!-- WARN leg + expanded fills -->
+            <div class="leg warn">
+              <div class="tick"><span style="height: 42px"></span></div>
+              <div class="lwrap">
+                <span class="seg-mi">↓ 383 mi</span
+                ><span class="dur">21 days idle</span>
+                <span class="fill">3 fan cities on route ▾</span>
+              </div>
+            </div>
+            <div class="fills">
+              <div class="fhead">
+                Fill this gap — densest cities on the Nashville → Plainfield
+                line
+              </div>
+              <div class="fillrow">
+                <span class="fdot"></span
+                ><span class="fcity">Louisville, KY</span
+                ><span class="fmeta">+36 mi · ~Jun 04 · 41 fans</span
+                ><span class="fadd">⊕</span>
+              </div>
+              <div class="fillrow">
+                <span class="fdot"></span
+                ><span class="fcity">Indianapolis, IN</span
+                ><span class="fmeta">+37 mi · ~Jun 09 · 58 fans</span
+                ><span class="fadd">⊕</span>
+              </div>
+              <div class="fillrow">
+                <span class="fdot"></span><span class="fcity">Carmel, IN</span
+                ><span class="fmeta">+38 mi · ~Jun 14 · 22 fans</span
+                ><span class="fadd">⊕</span>
+              </div>
+            </div>
+
+            <!-- stop 3 -->
+            <div class="stop">
+              <span class="node"></span>
+              <div class="date">
+                <div class="dow">Sat</div>
+                <div class="dm">Jun 20</div>
+              </div>
+              <div class="body">
+                <div class="venue">Oasis Christian Fellowship</div>
+                <div class="city">
+                  Plainfield, IN <span class="who">▸ who</span>
+                </div>
+              </div>
+              <div class="reach">
+                <div class="n">70</div>
+                <div class="u">fans · 60mi</div>
+                <div class="bar"><i class="hi" style="width: 74%"></i></div>
+              </div>
+            </div>
+            <div class="leg">
+              <div class="tick"><span style="height: 30px"></span></div>
+              <div class="lwrap">
+                <span class="seg-mi">↓ 194 mi</span
+                ><span class="dur">27 days idle</span
+                ><span class="fill">1 fan city on route ▸</span>
+              </div>
+            </div>
+
+            <!-- stop 4 -->
+            <div class="stop">
+              <span class="node"></span>
+              <div class="date">
+                <div class="dow">Fri</div>
+                <div class="dm">Jul 17</div>
+              </div>
+              <div class="body">
+                <div class="venue">Fountain Park</div>
+                <div class="city">
+                  Van Wert, OH <span class="who">▸ who</span>
+                </div>
+              </div>
+              <div class="reach">
+                <div class="n dim">9</div>
+                <div class="u">fans · 60mi</div>
+                <div class="bar"><i class="lo" style="width: 10%"></i></div>
+              </div>
+            </div>
+            <div class="leg warn">
+              <div class="tick"><span style="height: 18px"></span></div>
+              <div class="lwrap">
+                <span class="seg-mi">↓ 851 mi</span
+                ><span class="dur">8 days</span
+                ><span class="mode-w">long haul</span
+                ><span class="fill">3 fan cities on route ▸</span>
+              </div>
+            </div>
+
+            <!-- stop 5 -->
+            <div class="stop">
+              <span class="node"></span>
+              <div class="date">
+                <div class="dow">Sat</div>
+                <div class="dm">Jul 25</div>
+              </div>
+              <div class="body">
+                <div class="venue">Mill Pond Park</div>
+                <div class="city">
+                  Swans Island, ME <span class="who">▸ who</span>
+                </div>
+              </div>
+              <div class="reach">
+                <div class="n dim">2</div>
+                <div class="u">fans · 60mi</div>
+                <div class="bar"><i class="lo" style="width: 4%"></i></div>
+              </div>
+            </div>
+            <div class="leg">
+              <div class="tick"><span style="height: 12px"></span></div>
+              <div class="lwrap">
+                <span class="seg-mi">↓ 983 mi</span
+                ><span class="dur">1 day</span><span class="mode-w">fly</span>
+              </div>
+            </div>
+
+            <!-- stop 6 -->
+            <div class="stop">
+              <span class="node"></span>
+              <div class="date">
+                <div class="dow">Sun</div>
+                <div class="dm">Jul 26</div>
+              </div>
+              <div class="body">
+                <div class="venue">Oakholm Farm Estate</div>
+                <div class="city">
+                  Brookfield, MA <span class="who">▸ who</span>
+                </div>
+              </div>
+              <div class="reach">
+                <div class="n">26</div>
+                <div class="u">fans · 60mi</div>
+                <div class="bar"><i class="mid" style="width: 27%"></i></div>
+              </div>
+            </div>
+            <div class="leg warn">
+              <div class="tick"><span style="height: 42px"></span></div>
+              <div class="lwrap">
+                <span class="seg-mi">↓ 435 mi</span
+                ><span class="dur">42 days idle</span
+                ><span class="fill">2 fan cities on route ▸</span>
+              </div>
+            </div>
+
+            <!-- stop 7 -->
+            <div class="stop">
+              <span class="node"></span>
+              <div class="date">
+                <div class="dow">Sun</div>
+                <div class="dm">Sep 6</div>
+              </div>
+              <div class="body">
+                <div class="venue">Nelson Park</div>
+                <div class="city">
+                  Sioux Falls, SD <span class="who">▸ who</span>
+                </div>
+              </div>
+              <div class="reach">
+                <div class="n dim">7</div>
+                <div class="u">fans · 60mi</div>
+                <div class="bar"><i class="lo" style="width: 8%"></i></div>
+              </div>
+            </div>
+          </div>
+          <!-- end #pane-current -->
+
+          <!-- TOUR HERE (alternate mode) -->
+          <div id="pane-tourhere" style="display: none">
+            <div class="thcard">
+              <div class="throw">
+                <label class="thfield">
+                  <span class="thk">How many shows</span>
+                  <input class="thin" type="number" value="8" />
+                </label>
+                <label class="thfield">
+                  <span class="thk">Starting</span>
+                  <input class="thin" type="date" value="2026-06-12" />
+                </label>
+                <label class="thfield">
+                  <span class="thk">Spacing</span>
+                  <input class="thin" type="number" value="4" />
+                </label>
+                <label class="thfield">
+                  <span class="thk">Routing style</span>
+                  <span class="thseg">
+                    <button>Geo chain</button><button>Density</button
+                    ><button class="sel">Corridor</button>
+                  </span>
+                </label>
+                <button class="thgo">Propose tour →</button>
+              </div>
+            </div>
+            <div class="thhead">
+              <span class="label" style="letter-spacing: 0.1em"
+                >Proposed · 8 stops</span
+              >
+              <span class="thstat"
+                >412 fans reached
+                <span style="color: var(--ink-3)"
+                  >· 24% of file @ 60mi</span
+                ></span
+              >
+              <span class="thactions">
+                <button class="thapply">⊕ Apply all 8</button>
+                <button class="thexport">⇣ Export mailing list</button>
+              </span>
+            </div>
+            <div class="thlist">
+              <div class="throw2">
+                <span class="thnode"></span><span class="thidx tnum">01</span>
+                <span class="thdate mono">Jun 12</span>
+                <span class="thcity">Chicago, <span class="st">IL</span></span>
+                <span class="thtag">Additive tour date · #01</span>
+                <span class="thfans tnum">88</span>
+              </div>
+              <div class="throw2">
+                <span class="thnode"></span><span class="thidx tnum">02</span>
+                <span class="thdate mono">Jun 16</span>
+                <span class="thcity"
+                  >Milwaukee, <span class="st">WI</span></span
+                >
+                <span class="thtag">Additive tour date · #02</span>
+                <span class="thfans tnum">54</span>
+              </div>
+              <div class="throw2">
+                <span class="thnode"></span><span class="thidx tnum">03</span>
+                <span class="thdate mono">Jun 20</span>
+                <span class="thcity"
+                  >Indianapolis, <span class="st">IN</span></span
+                >
+                <span class="thtag">Additive tour date · #03</span>
+                <span class="thfans tnum">58</span>
+              </div>
+              <div class="throw2">
+                <span class="thnode"></span><span class="thidx tnum">04</span>
+                <span class="thdate mono">Jun 24</span>
+                <span class="thcity">Detroit, <span class="st">MI</span></span>
+                <span class="thtag">Additive tour date · #04</span>
+                <span class="thfans tnum">61</span>
+              </div>
+              <div class="thmore">+ 4 more stops</div>
+            </div>
+          </div>
+          <!-- end #pane-tourhere -->
+        </div>
+        <!-- end .leftcol -->
+
+        <!-- MAP -->
+        <div class="mappane">
+          <div class="mapcard">
+            <div class="maptop">
+              <span class="label">Map</span>
+              <span class="togg" id="densToggle"
+                ><span class="t">Fan density</span
+                ><span class="switch"><i></i></span
+              ></span>
+              <span class="tiles">
+                <button class="sel">Voyager</button>
+                <button>Clean</button>
+                <button>Terrain</button>
+                <button>Dark</button>
+              </span>
+            </div>
+            <div class="mapview">
+              <svg viewBox="0 0 480 420" preserveAspectRatio="xMidYMid meet">
+                <!-- abstract calm US field -->
+                <path
+                  class="usoutline"
+                  d="M70 150 L120 120 L200 110 L300 105 L400 120 L430 150 L425 210 L400 250 L420 270 L405 285 L360 280 L330 300 L300 330 L250 340 L200 320 L150 300 L110 260 L80 210 Z"
+                />
+                <!-- route line through the 7 stops (roughly echoing the real geography) -->
+                <path
+                  class="route"
+                  d="M150 270 L168 250 L250 215 L300 210 L405 175 L300 250 L210 235"
+                />
+                <!-- pins -->
+                <g class="pin booked">
+                  <circle cx="150" cy="270" r="9" />
+                  <text x="150" y="270">1</text>
+                </g>
+                <g class="pin booked">
+                  <circle cx="168" cy="250" r="9" />
+                  <text x="168" y="250">2</text>
+                </g>
+                <g class="pin booked">
+                  <circle cx="250" cy="215" r="9" />
+                  <text x="250" y="215">3</text>
+                </g>
+                <g class="pin booked">
+                  <circle cx="300" cy="210" r="9" />
+                  <text x="300" y="210">4</text>
+                </g>
+                <g class="pin booked">
+                  <circle cx="405" cy="175" r="9" />
+                  <text x="405" y="175">5</text>
+                </g>
+                <g class="pin booked">
+                  <circle cx="380" cy="195" r="9" />
+                  <text x="380" y="195">6</text>
+                </g>
+                <g class="pin booked">
+                  <circle cx="210" cy="235" r="9" />
+                  <text x="210" y="235">7</text>
+                </g>
+              </svg>
+            </div>
+            <div class="maplegend">
+              <span class="lg"><span class="s r"></span>Booked</span>
+              <span class="lg"><span class="s b"></span>Additive</span>
+              <span class="lg"><span class="s line"></span>Route</span>
+              <span class="lg" style="margin-left: auto; color: var(--ink-4)"
+                >Density off — toggle to overlay</span
+              >
+            </div>
+          </div>
+          <div class="footnote">
+            Straight-line miles from city centers — close enough to rank
+            routing. Click a leg to frame it; click a pin for the stop.
+          </div>
+
+          <!-- TOUR AGENT dock — collapsed by default, summon when needed -->
+          <div class="agent" id="agent">
+            <button class="agent-head" id="agentHead">
+              <span class="agent-spark">✦</span>
+              <span class="agent-title">Tour agent</span>
+              <span class="agent-sub serif"
+                >Ask in plain English — “add Texas in July, drivable only”</span
+              >
+              <span class="agent-chev">▸</span>
+            </button>
+            <div class="agent-body">
+              <div class="agent-msg">
+                Tell me drive vs fly, blackout dates, or a region to focus —
+                I’ll propose stops and drop them in as additive dates.
+              </div>
+              <div class="agent-input">
+                <input
+                  type="text"
+                  placeholder="e.g. keep it east of the Mississippi, no Mondays"
+                />
+                <button>Send →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pill-note">Mockup · v2 clean — not wired</div>
+
+    <script>
+      // density toggle
+      const dt = document.getElementById("densToggle");
+      dt.addEventListener("click", () => dt.classList.toggle("on"));
+
+      // tile style
+      document.querySelectorAll(".tiles button").forEach((b) => {
+        b.addEventListener("click", () => {
+          document
+            .querySelectorAll(".tiles button")
+            .forEach((x) => x.classList.remove("sel"));
+          b.classList.add("sel");
+        });
+      });
+
+      // routing-style segmented (inside Tour Here)
+      document.querySelectorAll(".thseg button").forEach((b) => {
+        b.addEventListener("click", () => {
+          document
+            .querySelectorAll(".thseg button")
+            .forEach((x) => x.classList.remove("sel"));
+          b.classList.add("sel");
+        });
+      });
+
+      // MODE TOGGLE — swaps the left pane between Current and Tour Here
+      const paneCurrent = document.getElementById("pane-current");
+      const paneTour = document.getElementById("pane-tourhere");
+      const hint = document.getElementById("modeHint");
+      document.querySelectorAll(".seg button").forEach((b) => {
+        b.addEventListener("click", () => {
+          document
+            .querySelectorAll(".seg button")
+            .forEach((x) => x.setAttribute("aria-checked", "false"));
+          b.setAttribute("aria-checked", "true");
+          const tour = b.dataset.mode === "tourhere";
+          paneCurrent.style.display = tour ? "none" : "";
+          paneTour.style.display = tour ? "" : "none";
+          hint.textContent = tour
+            ? "Build a future tour from his fanbase, from scratch."
+            : "Fill the gaps in his booked run.";
+        });
+      });
+
+      // RADIUS LENS — live value (in the live app this re-runs crossover)
+      const radius = document.getElementById("radius");
+      const radiusVal = document.getElementById("radiusVal");
+      radius.addEventListener("input", () => {
+        radiusVal.textContent = radius.value + " mi";
+        document
+          .querySelectorAll(".reach .u")
+          .forEach((u) => (u.textContent = "fans · " + radius.value + "mi"));
+      });
+
+      // TOUR AGENT dock
+      const agent = document.getElementById("agent");
+      document
+        .getElementById("agentHead")
+        .addEventListener("click", () => agent.classList.toggle("open"));
+    </script>
+  </body>
+</html>
