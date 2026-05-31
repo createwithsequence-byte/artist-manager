@@ -32,9 +32,10 @@ const TourMap = dynamic(() => import("./TourMap"), {
 type Props = {
   events: ArtistEvent[];
   artistName: string;
-  /** Stable per-artist identity (sp:<id> | nm:<name>) — keys this artist's
-   *  own customer dataset so Jesse's world is Jesse's, not a shared master. */
-  customerKey: string;
+  /** Candidate dataset keys, primary first (stable `nm:<name>`, then `sp:…`
+   *  healing fallbacks). Persist + world-link use the primary; hydrate tries
+   *  each in order and self-heals data found under an old key. */
+  customerKeys: string[];
 };
 
 type Loaded = { fileName: string; customers: Customer[]; geocode: GeocodeMap };
@@ -47,8 +48,12 @@ type Stage =
 export function CustomerCrossoverPanel({
   events,
   artistName,
-  customerKey,
+  customerKeys,
 }: Props) {
+  // Primary key (stable, name-based) drives persist + world link. The full
+  // list drives hydration's fallback+heal. keysDep is a stable effect dep.
+  const primaryKey = customerKeys[0] ?? `nm:${artistName.trim().toLowerCase()}`;
+  const keysDep = customerKeys.join("|");
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
   const [dragOver, setDragOver] = useState(false);
   const [radiusMiles, setRadiusMiles] = useState(60);
@@ -66,32 +71,66 @@ export function CustomerCrossoverPanel({
   const inputId = `crossover-csv-${artistName.replace(/\W+/g, "-")}`;
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // On mount: hydrate THIS ARTIST's saved customer dataset (keyed by identity)
-  // so their world + routing persist across sessions without re-upload. Stays
-  // idle if this artist has no saved data yet — then offer to adopt the
-  // legacy master if one exists, else the drop zone takes over.
+  // On mount: hydrate THIS ARTIST's saved customer dataset. Tries each
+  // candidate key in order (stable name key first, then Spotify fallbacks) so
+  // a dataset saved under any past identity form is still found. If a fallback
+  // key wins, self-heal: re-save it under the primary key so next session
+  // finds it directly. Falls back to the adopt-master offer if nothing exists.
   useEffect(() => {
     let cancelled = false;
     setMasterOffer(null);
-    fetch(`/api/customers?id=${encodeURIComponent(customerKey)}&raw=1`)
-      .then((r) => r.json())
-      .then(async (d) => {
-        if (cancelled) return;
-        if (d?.dataset && Array.isArray(d?.raw) && d.raw.length > 0) {
+
+    (async () => {
+      try {
+        let hit: { dataset: { name: string }; raw: Customer[] } | null = null;
+        let hitKey = "";
+        for (const key of customerKeys) {
+          const d = await fetch(
+            `/api/customers?id=${encodeURIComponent(key)}&raw=1`,
+          ).then((r) => r.json());
+          if (cancelled) return;
+          if (d?.dataset && Array.isArray(d?.raw) && d.raw.length > 0) {
+            hit = d;
+            hitKey = key;
+            break;
+          }
+        }
+
+        if (hit) {
           const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
           if (cancelled) return;
           setStage({
             kind: "ready",
             loaded: {
-              fileName: `★ ${d.dataset.name}`,
-              customers: d.raw as Customer[],
+              fileName: `★ ${hit.dataset.name}`,
+              customers: hit.raw,
               geocode: US_CITY_LATLNG as unknown as GeocodeMap,
             },
           });
           setUsingMaster(true);
-        } else if (customerKey !== "master") {
-          // No saved data for this artist — see if the legacy master can be
-          // adopted (so e.g. Jesse's pre-existing 4k becomes his in one click).
+          // Self-heal: found under an OLD key → copy onto the stable primary
+          // so the artist's data stops drifting between identity forms.
+          if (hitKey !== primaryKey) {
+            fetch("/api/customers", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                copyFrom: hitKey,
+                id: primaryKey,
+                name: artistName,
+              }),
+            }).catch((err) =>
+              console.warn(
+                "[CROSSOVER] self-heal failed:",
+                err instanceof Error ? err.message : String(err),
+              ),
+            );
+          }
+          return;
+        }
+
+        // Nothing under any key — offer to adopt the legacy global master.
+        if (primaryKey !== "master") {
           const list = await fetch("/api/customers").then((r) => r.json());
           if (cancelled) return;
           const master = Array.isArray(list?.datasets)
@@ -101,17 +140,20 @@ export function CustomerCrossoverPanel({
             setMasterOffer({ count: master.customerCount });
           }
         }
-      })
-      .catch((err) =>
-        console.warn(
-          "[CROSSOVER]",
-          err instanceof Error ? err.message : String(err),
-        ),
-      );
+      } catch (err) {
+        if (!cancelled)
+          console.warn(
+            "[CROSSOVER]",
+            err instanceof Error ? err.message : String(err),
+          );
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [customerKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keysDep]);
 
   // Adopt the legacy master as THIS artist's dataset — server-side copy
   // (master → customerKey), then hydrate the now-populated dataset. No
@@ -123,7 +165,7 @@ export function CustomerCrossoverPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         copyFrom: "master",
-        id: customerKey,
+        id: primaryKey,
         name: artistName,
       }),
     })
@@ -131,7 +173,7 @@ export function CustomerCrossoverPanel({
       .then(async (d) => {
         if (!d?.ok) throw new Error(d?.error || "adopt failed");
         const hd = await fetch(
-          `/api/customers?id=${encodeURIComponent(customerKey)}&raw=1`,
+          `/api/customers?id=${encodeURIComponent(primaryKey)}&raw=1`,
         ).then((r) => r.json());
         if (hd?.dataset && Array.isArray(hd?.raw) && hd.raw.length > 0) {
           const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
@@ -186,7 +228,7 @@ export function CustomerCrossoverPanel({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              id: customerKey,
+              id: primaryKey,
               name: artistName,
               aggregate,
               customerCount: customers.length,
@@ -306,7 +348,7 @@ export function CustomerCrossoverPanel({
           loaded={stage.loaded}
           events={events}
           artistName={artistName}
-          customerKey={customerKey}
+          customerKey={primaryKey}
           radiusMiles={radiusMiles}
           setRadiusMiles={setRadiusMiles}
           usingMaster={usingMaster}
