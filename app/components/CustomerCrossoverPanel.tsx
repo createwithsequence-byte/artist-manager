@@ -206,7 +206,11 @@ export function CustomerCrossoverPanel({
       complete: async (result) => {
         try {
           const customers = parseCustomers(result.data);
-          const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
+          const [{ US_CITY_LATLNG }, { WORLD_CITY_ADMIN, WORLD_CITY_COUNTRY }] =
+            await Promise.all([
+              import("@/lib/usCityToLatLng"),
+              import("@/lib/worldCityToLatLng"),
+            ]);
           const geocode = US_CITY_LATLNG as unknown as GeocodeMap;
           setStage({
             kind: "ready",
@@ -222,8 +226,11 @@ export function CustomerCrossoverPanel({
           // routing sessions hydrate from the same source. Replaces this
           // artist's prior dataset (upload stays until re-uploaded). Dataset
           // name = artist name so the world is branded "{Artist}'s World".
-          // Fire-and-forget; UI shouldn't block.
-          const { aggregate } = aggregateByCity(customers, geocode);
+          // World geocode passed so non-US fans plot. Fire-and-forget.
+          const { aggregate } = aggregateByCity(customers, geocode, {
+            admin: WORLD_CITY_ADMIN,
+            country: WORLD_CITY_COUNTRY,
+          });
           fetch("/api/customers", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

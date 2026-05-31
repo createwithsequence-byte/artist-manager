@@ -135,16 +135,23 @@ export default function CustomersPage() {
         complete: async (result) => {
           try {
             const customers = parseCustomers(result.data);
-            const { US_CITY_LATLNG } = await import("@/lib/usCityToLatLng");
+            const [
+              { US_CITY_LATLNG },
+              { WORLD_CITY_ADMIN, WORLD_CITY_COUNTRY },
+            ] = await Promise.all([
+              import("@/lib/usCityToLatLng"),
+              import("@/lib/worldCityToLatLng"),
+            ]);
             const { aggregate, dropped } = aggregateByCity(
               customers,
               US_CITY_LATLNG as unknown as GeocodeMap,
+              { admin: WORLD_CITY_ADMIN, country: WORLD_CITY_COUNTRY },
             );
             if (aggregate.length === 0) {
               setStage({
                 kind: "error",
                 message:
-                  "No geocoded cities found. Check that the CSV has city + state columns and is US-based.",
+                  "No geocoded cities found. Check that the CSV has city + state columns.",
               });
               return;
             }

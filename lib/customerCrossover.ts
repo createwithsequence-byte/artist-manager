@@ -222,44 +222,160 @@ export type CityAggregate = {
   count: number;
 };
 
+/** World-cities lookup (non-US), keyed by `city|province` and `city|iso2`.
+ *  Optional second geocoder for aggregateByCity so international fans plot. */
+export type WorldGeocode = {
+  admin: Readonly<Record<string, readonly [number, number]>>;
+  country: Readonly<Record<string, readonly [number, number]>>;
+};
+
+// Strip accents so "Montréal" (customer) matches "montreal" (world key).
+const stripAccents = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+// Non-US province/state CODE → GeoNames admin NAME (lowercased), so a customer
+// who wrote "ON" or "NSW" still resolves. Ambiguous codes that collide with US
+// state codes (e.g. WA = Washington) are omitted — they fall through to the
+// US path or the name form instead.
+const PROVINCE_CODE_TO_NAME: Record<string, string> = {
+  // Canada
+  ON: "ontario",
+  QC: "quebec",
+  BC: "british columbia",
+  AB: "alberta",
+  MB: "manitoba",
+  SK: "saskatchewan",
+  NS: "nova scotia",
+  NB: "new brunswick",
+  NL: "newfoundland and labrador",
+  PE: "prince edward island",
+  NT: "northwest territories",
+  YT: "yukon",
+  NU: "nunavut",
+  // Australia (unambiguous codes only)
+  NSW: "new south wales",
+  VIC: "victoria",
+  QLD: "queensland",
+  SA: "south australia",
+  TAS: "tasmania",
+  ACT: "australian capital territory",
+};
+const PROVINCE_NAME_TO_CODE: Record<string, string> = Object.fromEntries(
+  Object.entries(PROVINCE_CODE_TO_NAME).map(([code, name]) => [name, code]),
+);
+// Common country NAME → iso2, for customers whose "state" is a country.
+const COUNTRY_NAME_TO_ISO: Record<string, string> = {
+  canada: "CA",
+  "united kingdom": "GB",
+  uk: "GB",
+  "great britain": "GB",
+  australia: "AU",
+  germany: "DE",
+  france: "FR",
+  ireland: "IE",
+  "new zealand": "NZ",
+  netherlands: "NL",
+  mexico: "MX",
+  spain: "ES",
+  italy: "IT",
+  sweden: "SE",
+  norway: "NO",
+  denmark: "DK",
+  brazil: "BR",
+  japan: "JP",
+  india: "IN",
+  "south africa": "ZA",
+  philippines: "PH",
+  switzerland: "CH",
+  austria: "AT",
+  belgium: "BE",
+  poland: "PL",
+  portugal: "PT",
+  singapore: "SG",
+};
+
+function bump(
+  buckets: Map<string, CityAggregate>,
+  key: string,
+  city: string,
+  stateCode: string,
+  coords: readonly [number, number],
+): void {
+  const ex = buckets.get(key);
+  if (ex) ex.count++;
+  else
+    buckets.set(key, {
+      city,
+      stateCode,
+      lat: coords[0],
+      lng: coords[1],
+      count: 1,
+    });
+}
+
 /**
- * Roll up a customer list into one row per geocoded city. Drops rows whose
- * state can't be normalized or whose city|state isn't in the bundled
- * US_CITY_LATLNG lookup — the globe/map can't render what it can't place.
- * Returns the aggregate sorted by count descending so the heaviest cities
- * land first (matters for the globe's draw-order: dense dots on top).
+ * Roll up a customer list into one row per geocoded city. Tries the precise
+ * US lookup first; if a `world` geocoder is supplied, non-US fans then resolve
+ * via their province name/code (Ontario/ON, NSW…) or country. Rows that match
+ * nowhere are dropped (the globe can't place what it can't geocode). Sorted by
+ * count desc so the heaviest cities draw on top.
  */
 export function aggregateByCity(
   customers: Customer[],
   geocode: GeocodeMap,
+  world?: WorldGeocode,
 ): { aggregate: CityAggregate[]; dropped: number } {
   const buckets = new Map<string, CityAggregate>();
   let dropped = 0;
   for (const c of customers) {
-    const stateCode = normalizeState(c.state);
     const cityKey = normalizeCity(c.city);
-    if (!stateCode || !cityKey) {
+    if (!cityKey) {
       dropped++;
       continue;
     }
-    const coords = geocode[`${cityKey}|${stateCode}`];
-    if (!coords) {
-      dropped++;
-      continue;
+
+    // 1) US path — precise, via the bundled US lookup.
+    const usState = normalizeState(c.state);
+    if (usState) {
+      const us = geocode[`${cityKey}|${usState}`];
+      if (us) {
+        bump(buckets, `${cityKey}|${usState}`, c.city ?? cityKey, usState, us);
+        continue;
+      }
     }
-    const key = `${cityKey}|${stateCode}`;
-    const existing = buckets.get(key);
-    if (existing) {
-      existing.count++;
-    } else {
-      buckets.set(key, {
-        city: c.city ?? cityKey,
-        stateCode,
-        lat: coords[0],
-        lng: coords[1],
-        count: 1,
-      });
+
+    // 2) World path — non-US, via province name/code, then country.
+    if (world && c.state) {
+      const cityAscii = stripAccents(cityKey);
+      const raw = c.state.trim();
+      const codeUp = raw.toUpperCase();
+      const sNorm = stripAccents(raw.toLowerCase());
+      const adminName = PROVINCE_CODE_TO_NAME[codeUp] ?? sNorm;
+      let coords = world.admin[`${cityAscii}|${adminName}`];
+      let region = adminName;
+      if (!coords) {
+        const iso =
+          COUNTRY_NAME_TO_ISO[sNorm] ??
+          (/^[A-Za-z]{2}$/.test(raw) ? codeUp : "");
+        if (iso) {
+          coords = world.country[`${cityAscii}|${iso.toLowerCase()}`];
+          region = iso.toLowerCase();
+        }
+      }
+      if (coords) {
+        const display =
+          PROVINCE_NAME_TO_CODE[region] ?? region.toUpperCase().slice(0, 3);
+        bump(
+          buckets,
+          `${cityAscii}|${region}`,
+          c.city ?? cityKey,
+          display,
+          coords,
+        );
+        continue;
+      }
     }
+
+    dropped++;
   }
   const aggregate = [...buckets.values()].sort((a, b) => b.count - a.count);
   return { aggregate, dropped };
