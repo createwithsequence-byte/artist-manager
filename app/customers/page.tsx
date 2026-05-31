@@ -60,6 +60,9 @@ export default function CustomersPage() {
   const [ovLabels, setOvLabels] = useState(false);
   const [ovPins, setOvPins] = useState(false);
   const [ovHeat, setOvHeat] = useState(false);
+  const [ovArcs, setOvArcs] = useState(false);
+  // How many top markets get city labels — revealed only when LABELS is on.
+  const [labelCount, setLabelCount] = useState(10);
   const [datasetName, setDatasetName] = useState("Songfinch Customer Master");
   // Dataset id — per-artist (sp:… / nm:…) when arrived at via ?artist, else
   // the global "master". Drives hydrate + persist so each artist's world is
@@ -504,6 +507,12 @@ export default function CustomersPage() {
                       ],
                       ["PINS", ovPins, setOvPins, "Pin markers on top markets"],
                       ["HEAT", ovHeat, setOvHeat, "Surface density heat glow"],
+                      [
+                        "ARCS",
+                        ovArcs,
+                        setOvArcs,
+                        "Great-circle spine connecting the top 10 markets in rank order",
+                      ],
                     ] as const
                   ).map(([label, val, set, tip], i) => (
                     <button
@@ -519,6 +528,33 @@ export default function CustomersPage() {
                     </button>
                   ))}
                 </div>
+                {/* Label-count control — only meaningful while LABELS is on.
+                    Clarifies that labels mark the TOP markets, and lets the
+                    user widen the set (the "why only some cities?" answer). */}
+                {ovLabels && (
+                  <div
+                    className="flex items-center border border-ink/25 mono text-xs"
+                    title="How many of the top markets get a city-name label"
+                  >
+                    <span className="px-2 h-8 inline-flex items-center text-ink/45 border-r border-ink/25">
+                      TOP
+                    </span>
+                    {([10, 25, 50] as const).map((n, i) => (
+                      <button
+                        key={n}
+                        onClick={() => setLabelCount(n)}
+                        aria-pressed={labelCount === n}
+                        className={`px-2.5 h-8 ${i > 0 ? "border-l border-ink/25" : ""} transition-colors ${
+                          labelCount === n
+                            ? "bg-ink text-cream"
+                            : "text-ink/55 hover:text-ink"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
             )}
             <span className="mono text-ink/45 text-xs ml-auto truncate">
@@ -551,6 +587,8 @@ export default function CustomersPage() {
                 showLabels={ovLabels}
                 showPins={ovPins}
                 showHeat={ovHeat}
+                showArcs={ovArcs}
+                labelCount={labelCount}
                 autoRotate
               />
             ) : (

@@ -15,6 +15,9 @@ type Props = {
   showLabels?: boolean;
   showPins?: boolean;
   showHeat?: boolean;
+  showArcs?: boolean;
+  /** How many top markets get city-name labels (default 10). */
+  labelCount?: number;
 };
 
 const RED = "#F23222";
@@ -45,6 +48,8 @@ export default function CustomerGlobe({
   showLabels = false,
   showPins = false,
   showHeat = false,
+  showArcs = false,
+  labelCount = 10,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
@@ -117,6 +122,42 @@ export default function CustomerGlobe({
     () => [aggregate.map((a) => ({ lat: a.lat, lng: a.lng, weight: a.count }))],
     [aggregate],
   );
+
+  // Labels get their OWN slice — decoupled from rings/pins (TOP_N) so the user
+  // can dial label density (10 / 25 / 50) without flooding the other overlays.
+  const labelCities = useMemo(
+    () =>
+      aggregate.slice(0, Math.max(0, labelCount)).map((a) => ({
+        lat: a.lat,
+        lng: a.lng,
+        city: a.city,
+        stateCode: a.stateCode,
+        count: a.count,
+      })),
+    [aggregate, labelCount],
+  );
+
+  // ARCS — a great-circle "spine" threading the densest markets in rank order
+  // (#1→#2→#3…). Reads as the fanbase's center of gravity, not a tour route.
+  const arcsData = useMemo(() => {
+    const n = Math.min(TOP_N, aggregate.length);
+    const seq = aggregate.slice(0, n);
+    const arcs: {
+      startLat: number;
+      startLng: number;
+      endLat: number;
+      endLng: number;
+    }[] = [];
+    for (let i = 0; i < seq.length - 1; i++) {
+      arcs.push({
+        startLat: seq[i].lat,
+        startLng: seq[i].lng,
+        endLat: seq[i + 1].lat,
+        endLng: seq[i + 1].lng,
+      });
+    }
+    return arcs;
+  }, [aggregate]);
 
   // Auto-rotate + camera setup. Runs after globe init. Listens to
   // orbit-controls "start" so the FIRST drag/zoom kills rotation.
@@ -214,8 +255,8 @@ export default function CustomerGlobe({
         }}
         ringPropagationSpeed={1.4}
         ringRepeatPeriod={1500}
-        // LABELS — city name on the top markets.
-        labelsData={showLabels ? topCities : []}
+        // LABELS — city name on the top N markets (N = labelCount control).
+        labelsData={showLabels ? labelCities : []}
         labelLat="lat"
         labelLng="lng"
         labelText={(d: object) => (d as { city: string }).city}
@@ -224,6 +265,18 @@ export default function CustomerGlobe({
         labelColor={() => CREAM}
         labelResolution={2}
         labelAltitude={0.012}
+        // ARCS — great-circle spine connecting the densest markets in rank order.
+        arcsData={showArcs ? arcsData : []}
+        arcStartLat="startLat"
+        arcStartLng="startLng"
+        arcEndLat="endLat"
+        arcEndLng="endLng"
+        arcColor={() => [`rgba(30,45,219,0.05)`, `rgba(201,243,58,0.85)`]}
+        arcStroke={0.5}
+        arcDashLength={0.45}
+        arcDashGap={0.15}
+        arcDashAnimateTime={2200}
+        arcAltitudeAutoScale={0.35}
         // PINS — teardrop markers on the top markets (HTML elements).
         htmlElementsData={showPins ? topCities : []}
         htmlLat="lat"
