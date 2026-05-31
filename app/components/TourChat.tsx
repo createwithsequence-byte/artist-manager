@@ -213,6 +213,13 @@ function ProposalBlock({
           {s.reason && (
             <span className="serif-italic text-ink/60"> — {s.reason}</span>
           )}
+          {s.venues && s.venues.length > 0 && (
+            <div className="text-xs mt-0.5">
+              <span className="mono text-blue/70">◇ VENUE LEADS</span>{" "}
+              <span className="text-ink/65">{s.venues.join(" · ")}</span>{" "}
+              <span className="text-ink/35">(verify availability)</span>
+            </div>
+          )}
         </div>
       ))}
       <button

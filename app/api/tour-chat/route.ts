@@ -27,10 +27,16 @@ const SCHEMA = {
               "YYYY-MM-DD. Gap-fill → falls between the two booked dates. New run → falls within the requested timeframe. Always obey blackout constraints.",
           },
           city: { type: Type.STRING },
-          state: { type: Type.STRING, description: "2-letter US state code" },
+          state: { type: Type.STRING, description: "2-letter state code" },
           reason: {
             type: Type.STRING,
             description: "one short line: why this stop",
+          },
+          venues: {
+            type: Type.ARRAY,
+            description:
+              "2-3 SPECIFIC, real candidate venues in this city matching the user's requested venue type (e.g. named churches / Christian venues). Real venue names you know, not generic descriptions. Empty only if the user named no venue type.",
+            items: { type: Type.STRING },
           },
         },
         required: ["date", "city", "state", "reason"],
@@ -51,11 +57,12 @@ CORE RULES:
 - NEVER move, remove, or re-date an anchored (booked) date. You MAY add new dates before, after, or between them.
 - Draw proposed cities from the fan data given — prefer on-route fill candidates for gaps, and the top untapped markets for new runs. Pick the densest fan cities that fit the user's constraints.
 - For a NEW RUN, route it sensibly: order cities so consecutive drives are reasonable (geographically chained, not zig-zagging coast to coast), and space the dates across the requested window with rest days.
+- USE DISTINCT CITIES. Never repeat a city unless the user explicitly asks for multiple nights / a residency. For a long run (e.g. 15-20 dates) draw WIDELY from the full untapped-markets list and expand the geography across multiple states/regions — do NOT loop the same handful of cities to pad the count. You are given a deep candidate list; use the breadth of it. If there genuinely aren't enough distinct fan cities for the requested date count, propose fewer and say so rather than repeating.
 - Respect every constraint strictly:
   - "driving only / no flights" → keep consecutive legs drivable (~<450 mi/day); don't chain cross-country jumps in short windows.
   - blackout dates ("avoid August", "skip the first week") → never date a stop in that window.
   - regional focus ("Southeast only", "stay near Texas") → only propose stops in that region.
-- VENUE TYPE ("church / Christian venues", "theaters", "festivals", "small rooms"): you do NOT have a venue inventory, so you cannot verify a city has that venue type. Do NOT refuse for this reason. Propose the fan-dense CITIES that fit, and tell the user the venue-type is their booking call — you pick the markets, they book the room. If the artist's existing booked venues already match the type (look at the venue names in the snapshot), say the proposed cities suit the same circuit.
+- VENUE TYPE ("church / Christian venues", "theaters", "festivals", "small rooms", "colleges"): for EACH proposed stop, fill the "venues" field with 2-3 SPECIFIC, real, NAMED venues you know in that city that match the requested type AND could plausibly host an artist of this scale — favor actual churches, Christian colleges/coffeehouses, fellowship halls, and listening rooms over stadium-sized megachurches that don't book indie acts. These are LEADS for the user to verify (capacity, availability, booking contact) — say so once in the "reply" (e.g. "venue leads to confirm"). NEVER refuse a venue-type ask or punt it back as "your booking call" — always give named starting points. Look at the venue names in the snapshot to match the artist's existing circuit.
 - DATES: every proposed date is a real YYYY-MM-DD. Gap-fill → between the two booked dates. New run → within the timeframe the user asked about.
 - If the user only asked a question, answer in "reply" and omit proposedStops.
 - Keep "reply" tight and concrete — name cities, dates, fan counts, the route logic, and any honest caveat (like venue type). Never refuse something you can actually do.`;
@@ -151,6 +158,13 @@ Respond as JSON matching the schema. Reason over the snapshot + the user's messa
               city: s.city,
               state: (s.state || "").toUpperCase().slice(0, 2),
               reason: s.reason ?? "",
+              venues: Array.isArray(s.venues)
+                ? s.venues
+                    .filter(
+                      (v): v is string => typeof v === "string" && !!v.trim(),
+                    )
+                    .slice(0, 3)
+                : undefined,
             }))
         : undefined,
     };

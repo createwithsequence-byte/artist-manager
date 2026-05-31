@@ -8,6 +8,9 @@ export type ProposedStop = {
   city: string;
   state: string; // 2-letter
   reason: string;
+  /** 2-3 candidate venue names in this city matching the user's venue type
+   *  (e.g. churches/Christian venues) — LEADS to verify, not confirmed bookings. */
+  venues?: string[];
 };
 
 export type TourChatResult = {

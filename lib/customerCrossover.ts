@@ -693,7 +693,10 @@ export function crossover(
         !stopCoords.some((sc) => haversineMiles(sc, agg.coords) <= radiusMiles),
     )
     .sort((a, b) => b.count - a.count)
-    .slice(0, 10)
+    // 50 (was 10) so the tour agent + TOUR HERE have a deep enough candidate
+    // pool to build long, geographically-varied runs without looping a few
+    // cities. The UI shelf slices this down for display.
+    .slice(0, 50)
     .map((agg) => ({
       city: agg.city,
       stateCode: agg.stateCode,

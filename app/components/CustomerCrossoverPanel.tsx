@@ -1426,7 +1426,7 @@ function UntappedShelf({
       {open && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-x-8 gap-y-1 mt-3">
-            {result.untappedMarkets.map((m, i) => (
+            {result.untappedMarkets.slice(0, 15).map((m, i) => (
               <div key={i} className="flex items-baseline gap-2">
                 <span className="mono text-ink/40 w-5">
                   {String(i + 1).padStart(2, "0")}
