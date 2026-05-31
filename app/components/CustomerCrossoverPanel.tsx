@@ -423,7 +423,7 @@ function RoutingSheet({
   onReset: () => void;
 }) {
   const [selectedLeg, setSelectedLeg] = useState<number | null>(null);
-  const [provisional, setProvisional] = useState<ArtistEvent[]>([]);
+  const [bookedProvisional, setBookedProvisional] = useState<ArtistEvent[]>([]);
   const [planOpen, setPlanOpen] = useState(false);
   // Defer the radius fed to the (two) crossover passes so dragging the slider
   // stays responsive — the thumb + labels track the live value, the heavy
@@ -444,6 +444,29 @@ function RoutingSheet({
   // The proposed future tour the user is reviewing (before APPLY ALL).
   const [thProposal, setThProposal] = useState<ArtistEvent[]>([]);
 
+  // New-tour workspace — a from-scratch run that lives SEPARATELY from the
+  // booked dates, with its own spine + map. APPLY targets "current" (merge
+  // into the booked run) or "new tour" (seed newTour + switch view). Each tour
+  // gets its own provisional so gap-fills don't leak between them. By deriving
+  // the active provisional/setter/base-events here, every downstream reference
+  // to `provisional`/`setProvisional`/`baseEvents` follows the active tour
+  // with zero further changes.
+  const [tourView, setTourView] = useState<"booked" | "new">("booked");
+  const [newTour, setNewTour] = useState<ArtistEvent[]>([]);
+  const [newProvisional, setNewProvisional] = useState<ArtistEvent[]>([]);
+  const isNew = tourView === "new";
+  const baseEvents = isNew ? newTour : events;
+  const provisional = isNew ? newProvisional : bookedProvisional;
+  const setProvisional = isNew ? setNewProvisional : setBookedProvisional;
+  // Open a proposal as a standalone new tour: it becomes the new tour's base
+  // dates (not provisional), with a fresh provisional, and we switch to it.
+  const openAsNewTour = (stops: ArtistEvent[]) => {
+    setSelectedLeg(null);
+    setNewTour(stops);
+    setNewProvisional([]);
+    setTourView("new");
+  };
+
   // Provisional what-if stops are appended to the event list; crossover
   // re-geocodes + re-sorts by date, so they slot into the spine + redraw the
   // route automatically. Keys flag them for distinct styling.
@@ -452,8 +475,8 @@ function RoutingSheet({
     [provisional],
   );
   const allEvents = useMemo(
-    () => [...events, ...provisional],
-    [events, provisional],
+    () => [...baseEvents, ...provisional],
+    [baseEvents, provisional],
   );
 
   const result: CustomerCrossover = useMemo(
@@ -470,11 +493,11 @@ function RoutingSheet({
   // earlier fills) and to show the before→after reach delta.
   const baseline: CustomerCrossover = useMemo(
     () =>
-      crossover(loaded.customers, events, {
+      crossover(loaded.customers, baseEvents, {
         radiusMiles: dRadius,
         geocode: loaded.geocode,
       }),
-    [loaded, events, dRadius],
+    [loaded, baseEvents, dRadius],
   );
 
   // Build the chronological spine: shows sorted by date, with the matching
@@ -652,6 +675,39 @@ function RoutingSheet({
     });
     return { placed: placeable.length, dropped };
   };
+  // Open the agent's stops as a STANDALONE new tour (not merged into the
+  // booked run). Geocode-validate, and seed each stop's venue with the agent's
+  // top venue lead so the new-tour spine shows a real venue name.
+  const applyAgentStopsAsNew = (
+    stops: ProposedStop[],
+  ): { placed: number; dropped: number } => {
+    const placeable = stops.filter(
+      (s) =>
+        !!loaded.geocode[
+          `${s.city.toLowerCase().trim()}|${(s.state || "").toUpperCase()}`
+        ],
+    );
+    const newEvents = placeable.map(
+      (s) =>
+        ({
+          date: s.date,
+          city: s.city,
+          state: s.state,
+          venue: s.venues?.[0] || "PROVISIONAL",
+        }) as ArtistEvent,
+    );
+    openAsNewTour(newEvents);
+    return {
+      placed: placeable.length,
+      dropped: stops.length - placeable.length,
+    };
+  };
+  // Open the TOUR HERE proposal as a standalone new tour.
+  const applyTourHereAsNew = () => {
+    if (thProposal.length === 0) return;
+    openAsNewTour(thProposal);
+    setThProposal([]);
+  };
   // Diff the DISPLAYED (rounded) percentages so "14% → 17%" reads as "+3pts",
   // never a rounding-artifact "+2pts".
   const reachDeltaPts =
@@ -689,7 +745,9 @@ function RoutingSheet({
       {/* Header — kicker + artist name, saved badge, world link, replace */}
       <div className="rs-head">
         <div>
-          <div className="rs-kicker">Routing Sheet</div>
+          <div className="rs-kicker">
+            {isNew ? "New Tour · proposed" : "Routing Sheet"}
+          </div>
           <div className="rs-name">{artistName}</div>
         </div>
         <div className="rs-head-actions">
@@ -719,6 +777,51 @@ function RoutingSheet({
           </button>
         </div>
       </div>
+
+      {/* Booked ↔ New-tour toggle — only once a standalone new tour exists.
+          Each tour has its own spine + map + crossover; this switches which
+          one the whole sheet is showing. */}
+      {newTour.length > 0 && (
+        <div
+          className="rs-tourtoggle"
+          role="radiogroup"
+          aria-label="Which tour"
+        >
+          <button
+            role="radio"
+            aria-checked={!isNew}
+            className={!isNew ? "active" : ""}
+            onClick={() => {
+              setSelectedLeg(null);
+              setTourView("booked");
+            }}
+          >
+            ● Booked run · {events.length}
+          </button>
+          <button
+            role="radio"
+            aria-checked={isNew}
+            className={isNew ? "active" : ""}
+            onClick={() => {
+              setSelectedLeg(null);
+              setTourView("new");
+            }}
+          >
+            ✦ New tour · {newTour.length}
+          </button>
+          <button
+            className="rs-tourtoggle-x"
+            onClick={() => {
+              setTourView("booked");
+              setNewTour([]);
+              setNewProvisional([]);
+            }}
+            title="Discard this new tour"
+          >
+            Discard ✕
+          </button>
+        </div>
+      )}
 
       {/* Stat ribbon — the bad number (low coverage) flags itself in red */}
       <div className="rs-ribbon">
@@ -897,11 +1000,18 @@ function RoutingSheet({
           {thProposal.length > 0 && (
             <>
               <button
-                className="rs-btn blue"
+                className="rs-btn"
                 onClick={applyTourHere}
-                title="Drop these stops into the spine as additive tour dates"
+                title="Merge these stops into the booked run as additive dates"
               >
-                ⊕ Apply all {thProposal.length}
+                ⊕ Add to current
+              </button>
+              <button
+                className="rs-btn blue"
+                onClick={applyTourHereAsNew}
+                title="Open these as a standalone new tour with its own map"
+              >
+                ✦ Open as new tour →
               </button>
               <button
                 className="rs-btn"
@@ -1101,6 +1211,7 @@ function RoutingSheet({
       <TourChat
         context={buildTourContext(result, artistName, radiusMiles)}
         onApplyStops={applyAgentStops}
+        onApplyAsNew={applyAgentStopsAsNew}
       />
 
       <div className="rs-foot">

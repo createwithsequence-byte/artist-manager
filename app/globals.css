@@ -209,6 +209,45 @@ body {
   color: #fff;
 }
 
+/* Booked ↔ New-tour toggle */
+.rsheet .rs-tourtoggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+}
+.rsheet .rs-tourtoggle button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--rs-line-strong);
+  background: #fff;
+  color: var(--rs-ink-2);
+  padding: 6px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.rsheet .rs-tourtoggle button.active {
+  background: var(--rs-ink);
+  color: #fff;
+  border-color: var(--rs-ink);
+}
+.rsheet .rs-tourtoggle .rs-tourtoggle-x {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--rs-ink-3);
+  text-decoration: underline;
+  padding: 6px 4px;
+}
+.rsheet .rs-tourtoggle .rs-tourtoggle-x:hover {
+  color: var(--rs-red);
+}
+
 /* stat ribbon */
 .rsheet .rs-ribbon {
   display: flex;

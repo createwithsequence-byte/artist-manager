@@ -13,9 +13,11 @@ const STARTERS = [
 export function TourChat({
   context,
   onApplyStops,
+  onApplyAsNew,
 }: {
   context: string;
   onApplyStops: (stops: ProposedStop[]) => { placed: number; dropped: number };
+  onApplyAsNew: (stops: ProposedStop[]) => { placed: number; dropped: number };
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -131,6 +133,7 @@ export function TourChat({
                   <ProposalBlock
                     stops={proposals[i]}
                     onApply={() => onApplyStops(proposals[i])}
+                    onApplyNew={() => onApplyAsNew(proposals[i])}
                   />
                 )}
               </div>
@@ -191,13 +194,16 @@ export function TourChat({
 function ProposalBlock({
   stops,
   onApply,
+  onApplyNew,
 }: {
   stops: ProposedStop[];
   onApply: () => { placed: number; dropped: number };
+  onApplyNew: () => { placed: number; dropped: number };
 }) {
   const [applied, setApplied] = useState<{
     placed: number;
     dropped: number;
+    where: "current" | "new";
   } | null>(null);
   return (
     <div className="mt-2 border-l-2 border-blue/40 pl-3 space-y-1">
@@ -222,17 +228,30 @@ function ProposalBlock({
           )}
         </div>
       ))}
-      <button
-        onClick={() => setApplied(onApply())}
-        disabled={!!applied}
-        className="mono text-xs mt-1 px-3 h-8 bg-blue text-cream hover:bg-ink transition-colors disabled:opacity-40"
-      >
-        {applied
-          ? applied.dropped > 0
-            ? `✓ APPLIED ${applied.placed} OF ${stops.length} — ${applied.dropped} NOT FOUND`
-            : `✓ APPLIED ${applied.placed} TO TOUR`
-          : `APPLY ${stops.length} TO TOUR →`}
-      </button>
+      {applied ? (
+        <div className="mono text-xs mt-1 text-blue">
+          {applied.dropped > 0
+            ? `✓ ${applied.placed} OF ${stops.length} → ${applied.where === "new" ? "NEW TOUR" : "CURRENT TOUR"} · ${applied.dropped} NOT FOUND`
+            : `✓ ${applied.placed} → ${applied.where === "new" ? "NEW TOUR (see toggle above)" : "CURRENT TOUR"}`}
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2 mt-1">
+          <button
+            onClick={() => setApplied({ ...onApply(), where: "current" })}
+            className="mono text-xs px-3 h-8 border border-ink/30 hover:bg-ink hover:text-cream transition-colors"
+            title="Merge into the booked run as additive dates"
+          >
+            ⊕ Add to current
+          </button>
+          <button
+            onClick={() => setApplied({ ...onApplyNew(), where: "new" })}
+            className="mono text-xs px-3 h-8 bg-blue text-cream hover:bg-ink transition-colors"
+            title="Open as a standalone new tour with its own map"
+          >
+            ✦ Open as new tour →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
