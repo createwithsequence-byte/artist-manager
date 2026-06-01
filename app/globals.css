@@ -209,6 +209,133 @@ body {
   color: #fff;
 }
 
+/* Saved-tour library — Save button + Saved▾ dropdown */
+.rsheet .rs-saved {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rsheet .rs-saved-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rs-ink-2);
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line-strong);
+  padding: 5px 10px;
+  border-radius: 5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.rsheet .rs-saved-btn:hover:not(:disabled) {
+  color: var(--rs-ink);
+  border-color: var(--rs-ink);
+}
+.rsheet .rs-saved-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rsheet .rs-saved-toggle.active {
+  background: var(--rs-ink);
+  color: #fff;
+  border-color: var(--rs-ink);
+}
+/* Dropdown — solid white over a hairline border (no SaaS drop shadow). The
+   2px ink cap reads as a pulled-out drawer against the sheet beneath it. */
+.rsheet .rs-saved-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 256px;
+  max-width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line-strong);
+  border-top: 2px solid var(--rs-ink);
+}
+.rsheet .rs-saved-empty {
+  font-size: 12px;
+  color: var(--rs-ink-3);
+  padding: 12px 14px;
+  line-height: 1.45;
+}
+.rsheet .rs-saved-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--rs-line);
+}
+.rsheet .rs-saved-row:last-child {
+  border-bottom: 0;
+}
+.rsheet .rs-saved-load {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.rsheet .rs-saved-load:hover {
+  background: var(--rs-blue-wash);
+}
+.rsheet .rs-saved-name {
+  font-size: 13px;
+  color: var(--rs-ink);
+  letter-spacing: 0.01em;
+}
+.rsheet .rs-saved-kind {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3);
+}
+.rsheet .rs-saved-del {
+  flex: 0 0 auto;
+  width: 34px;
+  font-size: 12px;
+  color: var(--rs-ink-4);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--rs-line);
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.rsheet .rs-saved-del:hover {
+  background: var(--rs-red-wash);
+  color: var(--rs-red);
+}
+/* Transient toast under the control — absolute so it never shifts the header */
+.rsheet .rs-saved-note {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--rs-ink-3);
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line);
+  padding: 4px 8px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* Booked ↔ New-tour toggle */
 .rsheet .rs-tourtoggle {
   display: flex;

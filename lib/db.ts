@@ -79,6 +79,25 @@ export async function ensureSchema(): Promise<void> {
     rows TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`);
+  // Saved tours — a per-artist library of frozen itinerary snapshots. Each row
+  // is a complete stop list (anchors + provisional) the user chose to keep, so
+  // it survives reload and can be reopened into the new-tour workspace. Keyed
+  // by artist_key (the customerKey identity the routing panel already uses).
+  // stops is small (a dozen Event objects, ~1KB) so list queries return it
+  // inline — no separate detail fetch needed. kind records where it came from
+  // ("booked" gap-fill vs "new" from-scratch run) for display only.
+  await db.execute(`CREATE TABLE IF NOT EXISTS saved_tour (
+    id TEXT PRIMARY KEY,
+    artist_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    stops TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_saved_tour_artist ON saved_tour(artist_key)`,
+  );
   _schemaReady = true;
 }
 

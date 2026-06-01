@@ -17,6 +17,7 @@ import {
   type RoutingSuggestion,
 } from "@/lib/customerCrossover";
 import type { Event as ArtistEvent } from "@/lib/types";
+import type { SavedTour } from "@/lib/savedTours";
 import { TourChat } from "./TourChat";
 import { buildTourContext, type ProposedStop } from "@/lib/tourChat";
 
@@ -403,6 +404,28 @@ function fmtDay(date: string): string {
     .toUpperCase();
 }
 
+/** Zero-friction default name for a saved tour: "12 stops · May 31–Jul 20".
+ *  Date strings are YYYY-MM-DD so a lexical sort is chronological. */
+function autoTourName(stops: ArtistEvent[]): string {
+  const dates = stops
+    .map((s) => s.date)
+    .filter(Boolean)
+    .sort();
+  const fmt = (d: string) => {
+    const dt = new Date(`${d}T00:00:00`);
+    return Number.isNaN(dt.getTime())
+      ? d
+      : dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+  const n = stops.length;
+  const range = dates.length
+    ? dates[0] === dates[dates.length - 1]
+      ? fmt(dates[0])
+      : `${fmt(dates[0])}–${fmt(dates[dates.length - 1])}`
+    : "no dates";
+  return `${n} stop${n === 1 ? "" : "s"} · ${range}`;
+}
+
 function RoutingSheet({
   loaded,
   events,
@@ -465,6 +488,91 @@ function RoutingSheet({
     setNewTour(stops);
     setNewProvisional([]);
     setTourView("new");
+  };
+
+  // Saved-tour library — per-artist snapshots persisted to Turso so a routed
+  // tour survives reload. Hydrated on mount; mutated through /api/tours, which
+  // returns the refreshed list so one round-trip keeps the UI in sync.
+  const [savedTours, setSavedTours] = useState<SavedTour[]>([]);
+  const [savedOpen, setSavedOpen] = useState(false);
+  const [savingTour, setSavingTour] = useState(false);
+  // Transient one-liner under the control ("Saved · …", "Loaded · …").
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/tours?artist=${encodeURIComponent(customerKey)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && Array.isArray(d.tours)) setSavedTours(d.tours);
+      })
+      .catch((err) => console.warn("[SAVED_TOURS] hydrate failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [customerKey]);
+
+  // Fade the transient save/load note after a few seconds.
+  useEffect(() => {
+    if (!saveNote) return;
+    const t = setTimeout(() => setSaveNote(null), 3500);
+    return () => clearTimeout(t);
+  }, [saveNote]);
+
+  const saveActiveTour = () => {
+    // The active tour = its base dates + whatever provisional stops are accepted.
+    const stops = [...baseEvents, ...provisional];
+    if (stops.length === 0) {
+      setSaveNote("Nothing to save yet");
+      return;
+    }
+    const name = autoTourName(stops);
+    setSavingTour(true);
+    setSaveNote(null);
+    fetch("/api/tours", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        artist: customerKey,
+        name,
+        kind: isNew ? "new" : "booked",
+        stops,
+      }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) throw new Error(d.error);
+        if (Array.isArray(d.tours)) setSavedTours(d.tours);
+        setSaveNote(`Saved · ${name}`);
+        setSavedOpen(true);
+      })
+      .catch((err) => {
+        console.warn("[SAVED_TOURS] save failed:", err);
+        setSaveNote("Save failed — retry");
+      })
+      .finally(() => setSavingTour(false));
+  };
+
+  // Load reopens a snapshot into the new-tour workspace (own spine + map),
+  // sidestepping any clash with live booked anchors.
+  const loadSavedTour = (t: SavedTour) => {
+    openAsNewTour(t.stops);
+    setSavedOpen(false);
+    setSaveNote(`Loaded · ${t.name}`);
+  };
+
+  const deleteSavedTour = (id: string) => {
+    // Optimistic removal — re-sync from the server's authoritative list after.
+    setSavedTours((prev) => prev.filter((t) => t.id !== id));
+    fetch(
+      `/api/tours?id=${encodeURIComponent(id)}&artist=${encodeURIComponent(customerKey)}`,
+      { method: "DELETE" },
+    )
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.tours)) setSavedTours(d.tours);
+      })
+      .catch((err) => console.warn("[SAVED_TOURS] delete failed:", err));
   };
 
   // Provisional what-if stops are appended to the event list; crossover
@@ -759,6 +867,62 @@ function RoutingSheet({
               <span className="rs-dot" /> Saved
             </span>
           )}
+          {/* Saved-tour library — snapshot the active tour, reopen or delete
+              past ones. Lives here so it's reachable from either tour view. */}
+          <div className="rs-saved">
+            <button
+              className="rs-saved-btn"
+              onClick={saveActiveTour}
+              disabled={savingTour}
+              title="Save this tour as a snapshot you can reopen later"
+            >
+              {savingTour ? "Saving…" : "⌸ Save tour"}
+            </button>
+            <button
+              className={`rs-saved-btn rs-saved-toggle${savedOpen ? " active" : ""}`}
+              onClick={() => setSavedOpen((o) => !o)}
+              aria-expanded={savedOpen}
+              title="Your saved tours for this artist"
+            >
+              Saved · {savedTours.length} {savedOpen ? "▴" : "▾"}
+            </button>
+            {savedOpen && (
+              <div className="rs-saved-menu" role="menu">
+                {savedTours.length === 0 ? (
+                  <div className="rs-saved-empty">
+                    No saved tours yet. Route a tour, then <b>Save tour</b>.
+                  </div>
+                ) : (
+                  savedTours.map((t) => (
+                    <div key={t.id} className="rs-saved-row">
+                      <button
+                        className="rs-saved-load"
+                        onClick={() => loadSavedTour(t)}
+                        title="Open this tour in the new-tour workspace"
+                      >
+                        <span className="rs-saved-name">{t.name}</span>
+                        <span className="rs-saved-kind">
+                          {t.kind === "new" ? "✦ new" : "● booked"}
+                        </span>
+                      </button>
+                      <button
+                        className="rs-saved-del"
+                        onClick={() => deleteSavedTour(t.id)}
+                        title="Delete this saved tour"
+                        aria-label={`Delete ${t.name}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+            {saveNote && !savedOpen && (
+              <div className="rs-saved-note">{saveNote}</div>
+            )}
+          </div>
+
           {/* Jump to this artist's own Songfinch World globe — same dataset,
               spatial lens. Opens the per-artist /customers view. */}
           <a
