@@ -1415,16 +1415,14 @@ function buildFanEmail(
   const shortDate = isNaN(dt.getTime())
     ? show.event.date
     : dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const subject = `${artistName} — playing ${city} ${shortDate}`;
+  const subject = `${artistName} is playing ${city}, ${shortDate}`;
   const venueClause = venue ? `, at ${venue}` : "";
   const body = [
-    `Hey,`,
-    ``,
-    `I'm playing ${city} on ${longDate}${venueClause}, and it'd mean a lot to have you there.`,
+    `Hey there! This is ${artistName} from Songfinch, I hope you're doing great. I made a song for you a while back and wanted to keep you in the loop - I'm playing ${city} on ${longDate}${venueClause}, and it'd mean a lot to have you there and would be great to talk about your story or hang out in person. If interested, please let me know! Info below. Have an amazing day.`,
     ``,
     `Tickets + details: [add link]`,
     ``,
-    `Hope to see you,`,
+    `Best,`,
     artistName,
   ].join("\n");
   return { emails, subject, body };
