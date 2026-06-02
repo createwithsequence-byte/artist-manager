@@ -1468,25 +1468,35 @@ function ShowRow({
     () => new Set((show.nearby ?? []).flatMap((n) => n.emails ?? [])).size,
     [show.nearby],
   );
-  // Open a tour-ready email with these fans BCC'd. mailto: keeps it in the
-  // sender's own client (no app-side sending / deliverability surface). Above
-  // ~1900 chars most clients truncate the URL, so for big groups we copy the
-  // list to the clipboard and open just the template for a paste-into-BCC.
+  // Open a tour-ready Gmail compose with these fans BCC'd — in a new tab, so
+  // the workbench stays put. Gmail web is the team's client (Workspace), and
+  // this sidesteps the OS default-mail-client lottery. No app-side sending, so
+  // no deliverability surface; the fan sees it from the artist's own address.
+  // Gmail tolerates long URLs, but a huge BCC hits its own ~500-recipient cap
+  // anyway — past a safe ceiling we copy the list + open just the template.
   const emailFans = () => {
     const { emails, subject, body } = buildFanEmail(show, artistName);
     if (emails.length === 0) {
       setEmailNote("No emails in this dataset");
       return;
     }
-    const full = `mailto:?bcc=${encodeURIComponent(emails.join(","))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    if (full.length <= 1900) {
-      window.location.href = full;
-      setEmailNote(`✓ Opening · ${emails.length} BCC'd`);
+    const su = encodeURIComponent(subject);
+    const bd = encodeURIComponent(body);
+    const compose = (bcc: string) =>
+      `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(bcc)}&su=${su}&body=${bd}`;
+    const full = compose(emails.join(","));
+    if (full.length <= 7000) {
+      window.open(full, "_blank", "noopener,noreferrer");
+      setEmailNote(`✓ Gmail · ${emails.length} BCC'd`);
     } else {
       navigator.clipboard
         ?.writeText(emails.join(", "))
         .catch((err) => console.warn("[EMAIL_FANS] clipboard failed:", err));
-      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.open(
+        `https://mail.google.com/mail/?view=cm&fs=1&su=${su}&body=${bd}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
       setEmailNote(`✓ ${emails.length} emails copied · paste into BCC`);
     }
   };
@@ -1589,7 +1599,7 @@ function ShowRow({
                   e.stopPropagation();
                   emailFans();
                 }}
-                title={`Open a tour-ready email with all ${fanEmailCount} reachable fans BCC'd`}
+                title={`Open a tour-ready Gmail with all ${fanEmailCount} reachable fans BCC'd`}
               >
                 ✉ Email {fanEmailCount} fans
               </button>
