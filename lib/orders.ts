@@ -105,3 +105,59 @@ export function ordersByUser(
 export function firstName(full: string): string {
   return (full || "").trim().split(/\s+/)[0] || full || "";
 }
+
+/* ── Identity Mirror: the artist's body-of-work portrait ───────────────────── */
+
+export type OrderSummary = {
+  total: number; // total songs
+  uniqueFans: number; // distinct people
+  byOccasion: { occasion: string; count: number }[]; // desc
+  byGenre: { genre: string; count: number }[]; // desc, capped
+  patronCount: number; // fans with 2+ songs
+  topPatrons: { name: string; count: number }[]; // desc, capped
+  ratedAvg: number | null; // mean rating where rated
+};
+
+/**
+ * Roll an artist's orders into a portrait of their work: what occasions they
+ * write for, in what genres, who keeps coming back. Runs server-side so only
+ * the counts (a few KB) cross the wire, never the multi-MB story blob.
+ */
+export function summarizeOrders(orders: ArtistOrder[]): OrderSummary {
+  const occ = new Map<string, number>();
+  const gen = new Map<string, number>();
+  const byUser = new Map<string, { name: string; count: number }>();
+  let ratingSum = 0;
+  let ratingN = 0;
+  for (const o of orders) {
+    const oc = (o.occasion || "").trim() || "Unspecified";
+    occ.set(oc, (occ.get(oc) ?? 0) + 1);
+    const g = (o.genre || "").trim();
+    if (g) gen.set(g, (gen.get(g) ?? 0) + 1);
+    const u = byUser.get(o.userId);
+    if (u) u.count += 1;
+    else byUser.set(o.userId, { name: o.customerName || "Fan", count: 1 });
+    if (typeof o.rating === "number") {
+      ratingSum += o.rating;
+      ratingN += 1;
+    }
+  }
+  const desc = (m: Map<string, number>) =>
+    [...m.entries()].sort((a, b) => b[1] - a[1]);
+  const patrons = [...byUser.values()]
+    .filter((u) => u.count >= 2)
+    .sort((a, b) => b.count - a.count);
+  return {
+    total: orders.length,
+    uniqueFans: byUser.size,
+    byOccasion: desc(occ).map(([occasion, count]) => ({ occasion, count })),
+    byGenre: desc(gen)
+      .slice(0, 6)
+      .map(([genre, count]) => ({ genre, count })),
+    patronCount: patrons.length,
+    topPatrons: patrons
+      .slice(0, 6)
+      .map((p) => ({ name: p.name, count: p.count })),
+    ratedAvg: ratingN ? ratingSum / ratingN : null,
+  };
+}

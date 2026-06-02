@@ -5,7 +5,7 @@ import {
   loadArtistOrders,
   upsertArtistOrders,
 } from "@/lib/customers";
-import type { ArtistOrder } from "@/lib/orders";
+import { summarizeOrders, type ArtistOrder } from "@/lib/orders";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -26,8 +26,18 @@ export async function GET(req: NextRequest) {
   if (!artist) {
     return Response.json({ error: "artist key required" }, { status: 400 });
   }
+  // ?summary=1 → aggregate server-side, return only the portrait (a few KB)
+  // instead of the multi-MB story blob.
+  const summaryOnly = req.nextUrl.searchParams.get("summary") === "1";
   try {
     const orders = await loadArtistOrders(artist);
+    if (summaryOnly) {
+      return Response.json({
+        configured: true,
+        summary: summarizeOrders(orders),
+        count: orders.length,
+      });
+    }
     return Response.json({ configured: true, orders, count: orders.length });
   } catch (err) {
     console.warn(

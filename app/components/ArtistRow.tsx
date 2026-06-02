@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArtistReport, Signal } from "@/lib/types";
 import { customerKeys } from "@/lib/identity";
 import { customerEmail, type Customer } from "@/lib/customerCrossover";
+import { firstName, type OrderSummary } from "@/lib/orders";
 import {
   ANNOUNCEMENT_LABEL,
   buildBroadcastEmail,
@@ -258,6 +259,11 @@ export function ArtistRow({
             </div>
           )}
 
+          <IdentityMirror
+            artistKey={customerKeys(report)[0]}
+            artistName={report.name}
+          />
+
           <NotesSection artistKey={customerKeys(report)[0]} />
 
           <AnnouncementsSection
@@ -439,6 +445,211 @@ export function ArtistRow({
       )}
     </div>
   );
+}
+
+// Identity Mirror — the artist's body-of-work portrait, rolled up from the
+// songs they've made: occasions, genres, patrons, where their people are.
+// Absent until orders are uploaded for the artist.
+function IdentityMirror({
+  artistKey,
+  artistName,
+}: {
+  artistKey: string;
+  artistName: string;
+}) {
+  const [summary, setSummary] = useState<OrderSummary | null>(null);
+  const [topStates, setTopStates] = useState<
+    { state: string; count: number }[]
+  >([]);
+  const [phase, setPhase] = useState<"loading" | "ready" | "none">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    setPhase("loading");
+    fetch(`/api/orders?artist=${encodeURIComponent(artistKey)}&summary=1`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d?.summary && d.summary.total > 0) {
+          setSummary(d.summary);
+          setPhase("ready");
+        } else setPhase("none");
+      })
+      .catch((err) => {
+        console.warn("[MIRROR] summary failed:", err);
+        if (!cancelled) setPhase("none");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artistKey]);
+
+  // Top states from the customer aggregate (city roll-up) — optional, graceful.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/customers?id=${encodeURIComponent(artistKey)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const agg = d?.dataset?.aggregate;
+        if (!Array.isArray(agg)) return;
+        const m = new Map<string, number>();
+        for (const c of agg) {
+          const s = (c?.stateCode || "").trim();
+          if (s) m.set(s, (m.get(s) ?? 0) + (c?.count || 0));
+        }
+        setTopStates(
+          [...m.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([state, count]) => ({ state, count })),
+        );
+      })
+      .catch((err) => console.warn("[MIRROR] geo failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [artistKey]);
+
+  if (phase !== "ready" || !summary) return null;
+
+  const occMax = summary.byOccasion[0]?.count || 1;
+  const line = characterizePortrait(summary);
+
+  return (
+    <div className="md:col-span-2 pt-3 border-t border-ink/10">
+      <div className="mono text-ink/50 mb-3">
+        ✦ BODY OF WORK · {artistName.toUpperCase()}
+      </div>
+      <div className="flex items-baseline gap-3 flex-wrap mb-1">
+        <span className="display text-4xl md:text-5xl text-red">
+          {summary.total.toLocaleString()}
+        </span>
+        <span className="serif-italic text-ink/70">
+          songs for {summary.uniqueFans.toLocaleString()} real people
+        </span>
+      </div>
+      {line && (
+        <div className="serif-italic text-ink/80 mb-4 max-w-2xl">{line}</div>
+      )}
+
+      <div className="grid md:grid-cols-2 gap-x-10 gap-y-4">
+        <div>
+          <div className="mono text-ink/45 mb-2 text-xs">OCCASIONS</div>
+          <div className="space-y-1">
+            {summary.byOccasion.slice(0, 8).map((o) => {
+              const pct = Math.round((o.count / summary.total) * 100);
+              return (
+                <div
+                  key={o.occasion}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <span className="w-32 md:w-40 truncate shrink-0">
+                    {o.occasion}
+                  </span>
+                  <span className="flex-1 h-2 bg-ink/10">
+                    <span
+                      className="block h-full bg-red"
+                      style={{
+                        width: `${Math.max(3, Math.round((o.count / occMax) * 100))}%`,
+                      }}
+                    />
+                  </span>
+                  <span className="mono text-ink/55 w-20 text-right shrink-0">
+                    {o.count.toLocaleString()} · {pct}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {summary.byGenre.length > 0 && (
+            <div>
+              <div className="mono text-ink/45 mb-2 text-xs">GENRES</div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                {summary.byGenre.map((g) => (
+                  <span key={g.genre}>
+                    <span className="font-medium">{g.genre}</span>{" "}
+                    <span className="mono text-ink/45">
+                      {Math.round((g.count / summary.total) * 100)}%
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {summary.patronCount > 0 && (
+            <div>
+              <div className="mono text-ink/45 mb-2 text-xs">
+                PATRONS · CAME BACK
+              </div>
+              <div className="text-sm">
+                <span className="font-medium">{summary.patronCount}</span>{" "}
+                ordered 2+ songs.{" "}
+                {summary.topPatrons.length > 0 && (
+                  <span className="text-ink/70">
+                    Most-trusted:{" "}
+                    {summary.topPatrons
+                      .map((p) => `${firstName(p.name)} (${p.count})`)
+                      .join(", ")}
+                    .
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {topStates.length > 0 && (
+            <div>
+              <div className="mono text-ink/45 mb-2 text-xs">
+                WHERE THEIR PEOPLE ARE
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                {topStates.map((s) => (
+                  <span key={s.state}>
+                    <span className="font-medium">{s.state}</span>{" "}
+                    <span className="mono text-ink/45">
+                      {s.count.toLocaleString()}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {summary.ratedAvg != null && (
+            <div className="mono text-ink/45 text-xs">
+              AVG RATING · {summary.ratedAvg.toFixed(1)} / 5
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A short, data-true characterization of the catalog. Names the dominant
+// occasions, and surfaces memorials as the distinctive trust signal when
+// they're a meaningful share — that's the line that stops an artist cold.
+function characterizePortrait(s: OrderSummary): string {
+  if (!s.byOccasion.length) return "";
+  const top = s.byOccasion[0];
+  const topPct = Math.round((top.count / s.total) * 100);
+  const second = s.byOccasion[1];
+  const memorial = s.byOccasion.find((o) =>
+    /memorial|in memory|passed|passing|grief|sympathy|loss/i.test(o.occasion),
+  );
+  let line = `Mostly ${top.occasion.toLowerCase()} songs (${topPct}%)`;
+  if (second && second.count > 0)
+    line += `, then ${second.occasion.toLowerCase()}`;
+  line += ".";
+  if (memorial && memorial !== top && memorial.count >= 10) {
+    line += ` ${memorial.count.toLocaleString()} are memorials — people trust this artist with grief.`;
+  }
+  return line;
 }
 
 // Internal team notes per artist — autosaving scratchpad, keyed by the stable
