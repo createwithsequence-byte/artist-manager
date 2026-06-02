@@ -1301,6 +1301,7 @@ function RoutingSheet({
                 <ShowRow
                   show={show}
                   index={i}
+                  artistName={artistName}
                   radiusMiles={radiusMiles}
                   maxReach={maxReach}
                   provisional={provisionalKeys.has(
@@ -1387,10 +1388,54 @@ function RoutingSheet({
   );
 }
 
+/** Assemble the BCC list + a tour-ready subject/body for a stop's reached
+ *  fans. Emails are deduped across the stop's nearby cities; the body is a
+ *  scaffold the sender edits (ticket link, tone) — written in the artist's
+ *  voice, not product-speak. */
+function buildFanEmail(
+  show: CustomerCrossover["perEvent"][number],
+  artistName: string,
+): { emails: string[]; subject: string; body: string } {
+  const emails = [
+    ...new Set((show.nearby ?? []).flatMap((n) => n.emails ?? [])),
+  ];
+  const city = show.event.city || "your city";
+  const state = show.stateCode ? `, ${show.stateCode}` : "";
+  const venue =
+    show.event.venue && show.event.venue !== "PROVISIONAL"
+      ? show.event.venue
+      : "";
+  const dt = new Date(`${show.event.date}T12:00:00`);
+  const longDate = isNaN(dt.getTime())
+    ? show.event.date
+    : dt.toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      });
+  const shortDate = isNaN(dt.getTime())
+    ? show.event.date
+    : dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const subject = `${artistName} — live in ${city} · ${shortDate}`;
+  const where = venue ? `${venue} in ${city}${state}` : `${city}${state}`;
+  const body = [
+    `Hi —`,
+    ``,
+    `I'm playing ${where} on ${longDate}. You're nearby, so I wanted you to be among the first to know.`,
+    ``,
+    `Tickets / details: [add link]`,
+    ``,
+    `Hope to see you there.`,
+    `— ${artistName}`,
+  ].join("\n");
+  return { emails, subject, body };
+}
+
 // ── show row ────────────────────────────────────────────────────────────────
 function ShowRow({
   show,
   index,
+  artistName,
   radiusMiles,
   maxReach,
   provisional,
@@ -1400,6 +1445,7 @@ function ShowRow({
 }: {
   show: CustomerCrossover["perEvent"][number];
   index: number;
+  artistName: string;
   radiusMiles: number;
   maxReach: number;
   provisional: boolean;
@@ -1408,6 +1454,7 @@ function ShowRow({
   onSelect: () => void;
 }) {
   const [whoOpen, setWhoOpen] = useState(false);
+  const [emailNote, setEmailNote] = useState<string | null>(null);
   const useRadius = show.lat !== undefined && show.lng !== undefined;
   const count = useRadius ? show.withinRadiusCount : show.sameStateCount;
   const nearby = show.nearby ?? [];
@@ -1415,6 +1462,39 @@ function ShowRow({
   const secondary = nearby.filter((n) => !n.isSameCity);
   const hasWho = nearby.length > 0;
   const nearbyCount = Math.max(0, show.withinRadiusCount - show.sameCityCount);
+
+  // Deduped count of fans with an email — the BCC reach for this stop.
+  const fanEmailCount = useMemo(
+    () => new Set((show.nearby ?? []).flatMap((n) => n.emails ?? [])).size,
+    [show.nearby],
+  );
+  // Open a tour-ready email with these fans BCC'd. mailto: keeps it in the
+  // sender's own client (no app-side sending / deliverability surface). Above
+  // ~1900 chars most clients truncate the URL, so for big groups we copy the
+  // list to the clipboard and open just the template for a paste-into-BCC.
+  const emailFans = () => {
+    const { emails, subject, body } = buildFanEmail(show, artistName);
+    if (emails.length === 0) {
+      setEmailNote("No emails in this dataset");
+      return;
+    }
+    const full = `mailto:?bcc=${encodeURIComponent(emails.join(","))}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    if (full.length <= 1900) {
+      window.location.href = full;
+      setEmailNote(`✓ Opening · ${emails.length} BCC'd`);
+    } else {
+      navigator.clipboard
+        ?.writeText(emails.join(", "))
+        .catch((err) => console.warn("[EMAIL_FANS] clipboard failed:", err));
+      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      setEmailNote(`✓ ${emails.length} emails copied · paste into BCC`);
+    }
+  };
+  useEffect(() => {
+    if (!emailNote) return;
+    const t = setTimeout(() => setEmailNote(null), 4000);
+    return () => clearTimeout(t);
+  }, [emailNote]);
 
   // Date split into weekday + month-day, parsed at noon to dodge the UTC
   // off-by-one (same trick fmtDay uses).
@@ -1498,8 +1578,23 @@ function ShowRow({
       {whoOpen && hasWho && (
         <div className="rs-whobox">
           <div className="rs-fhead">
-            ★ {show.sameCityCount} in city · ◌ {nearbyCount} nearby ≤
-            {radiusMiles}mi
+            <span>
+              ★ {show.sameCityCount} in city · ◌ {nearbyCount} nearby ≤
+              {radiusMiles}mi
+            </span>
+            {fanEmailCount > 0 && (
+              <button
+                className="rs-email"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  emailFans();
+                }}
+                title={`Open a tour-ready email with all ${fanEmailCount} reachable fans BCC'd`}
+              >
+                ✉ Email {fanEmailCount} fans
+              </button>
+            )}
+            {emailNote && <span className="rs-emailnote">{emailNote}</span>}
           </div>
           {inCity && <WhoRow group={inCity} accent />}
           {secondary.map((g, i) => (

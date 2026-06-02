@@ -850,12 +850,44 @@ body {
   gap: 1px;
 }
 .rsheet .rs-fhead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   font-family: var(--font-mono);
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--rs-ink-3);
   padding: 2px 0 4px;
+}
+/* Email-these-fans action — blue (the outreach/upcoming signal). */
+.rsheet .rs-email {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rs-blue);
+  background: transparent;
+  border: 1px solid var(--rs-blue);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.rsheet .rs-email:hover {
+  background: var(--rs-blue);
+  color: #fff;
+}
+.rsheet .rs-emailnote {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--rs-blue);
 }
 .rsheet .rs-fillrow {
   display: flex;

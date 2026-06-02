@@ -156,6 +156,9 @@ export type CustomerCrossover = {
       count: number;
       isSameCity: boolean;
       names: string[];
+      /** Every within-radius customer's email (uncapped, deduped at use site)
+       *  for BCC outreach. Empty when the dataset has no email column. */
+      emails: string[];
     }>;
     lat?: number;
     lng?: number;
@@ -534,6 +537,7 @@ export function crossover(
         count: number;
         isSameCity: boolean;
         names: string[];
+        emails: string[];
       }
     >();
     if (coords) {
@@ -552,11 +556,15 @@ export function crossover(
               count: 0,
               isSameCity: c._cityKey === bareCity && c._stateCode === stateCode,
               names: [],
+              emails: [],
             };
             nearbyMap.set(ckey, b);
           }
           b.count += 1;
           if (c.name && b.names.length < 12) b.names.push(c.name);
+          // Uncapped — a BCC list must reach every fan, not just the 12 shown.
+          const em = customerEmail(c);
+          if (em) b.emails.push(em);
         }
       });
     }
@@ -770,6 +778,31 @@ function extractCustomer(row: Record<string, string>): Customer {
     })(),
     raw: row,
   };
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Pull a plausible email from a customer's raw CSV row. Prefers a column whose
+ * header mentions email ("email", "Email", "email_address", "e-mail"); falls
+ * back to the first value that itself looks like an address — some exports
+ * label the column oddly or omit a header. Returns lowercased, or undefined
+ * when the row carries no email (so callers can simply skip it).
+ */
+export function customerEmail(c: Customer): string | undefined {
+  const raw = c.raw;
+  if (!raw) return undefined;
+  for (const k of Object.keys(raw)) {
+    if (/e-?mail/i.test(k)) {
+      const v = (raw[k] ?? "").trim();
+      if (EMAIL_RE.test(v)) return v.toLowerCase();
+    }
+  }
+  for (const k of Object.keys(raw)) {
+    const v = (raw[k] ?? "").trim();
+    if (EMAIL_RE.test(v)) return v.toLowerCase();
+  }
+  return undefined;
 }
 
 /** Parse a raw CSV row list into normalized Customer objects. */
