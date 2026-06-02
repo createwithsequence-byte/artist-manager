@@ -1400,7 +1400,6 @@ function buildFanEmail(
     ...new Set((show.nearby ?? []).flatMap((n) => n.emails ?? [])),
   ];
   const city = show.event.city || "your city";
-  const state = show.stateCode ? `, ${show.stateCode}` : "";
   const venue =
     show.event.venue && show.event.venue !== "PROVISIONAL"
       ? show.event.venue
@@ -1416,17 +1415,17 @@ function buildFanEmail(
   const shortDate = isNaN(dt.getTime())
     ? show.event.date
     : dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const subject = `${artistName} — live in ${city} · ${shortDate}`;
-  const where = venue ? `${venue} in ${city}${state}` : `${city}${state}`;
+  const subject = `${artistName} — playing ${city} ${shortDate}`;
+  const venueClause = venue ? `, at ${venue}` : "";
   const body = [
-    `Hi —`,
+    `Hey,`,
     ``,
-    `I'm playing ${where} on ${longDate}. You're nearby, so I wanted you to be among the first to know.`,
+    `I'm playing ${city} on ${longDate}${venueClause}, and it'd mean a lot to have you there.`,
     ``,
-    `Tickets / details: [add link]`,
+    `Tickets + details: [add link]`,
     ``,
-    `Hope to see you there.`,
-    `— ${artistName}`,
+    `Hope to see you,`,
+    artistName,
   ].join("\n");
   return { emails, subject, body };
 }
