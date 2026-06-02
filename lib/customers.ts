@@ -258,3 +258,35 @@ export async function loadArtistOrders(
     return [];
   }
 }
+
+/* ── Internal per-artist notes ─────────────────────────────────────────────── */
+
+export async function loadArtistNote(artistKey: string): Promise<string> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) return "";
+  const result = await db.execute({
+    sql: `SELECT note FROM artist_notes WHERE artist_key = ?`,
+    args: [artistKey],
+  });
+  const row = result.rows[0];
+  return row ? String(row.note ?? "") : "";
+}
+
+export async function saveArtistNote(
+  artistKey: string,
+  note: string,
+): Promise<void> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) throw new Error("Turso not configured");
+  const now = new Date().toISOString();
+  await db.execute({
+    sql: `INSERT INTO artist_notes (artist_key, note, updated_at)
+          VALUES (?, ?, ?)
+          ON CONFLICT(artist_key) DO UPDATE SET
+            note = excluded.note,
+            updated_at = excluded.updated_at`,
+    args: [artistKey, note, now],
+  });
+}

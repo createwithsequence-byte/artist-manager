@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ArtistReport, Signal } from "@/lib/types";
 import { customerKeys } from "@/lib/identity";
 import { CustomerCrossoverPanel } from "./CustomerCrossoverPanel";
@@ -251,6 +251,8 @@ export function ArtistRow({
             </div>
           )}
 
+          <NotesSection artistKey={customerKeys(report)[0]} />
+
           <Section title="01 — UPCOMING">
             {(report.events ?? []).length === 0 ? (
               <div className="serif-italic text-ink/60">
@@ -423,6 +425,101 @@ export function ArtistRow({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Internal team notes per artist — autosaving scratchpad, keyed by the stable
+// name-first identity so it survives re-scouts and never orphans.
+function NotesSection({ artistKey }: { artistKey: string }) {
+  const [note, setNote] = useState("");
+  const [status, setStatus] = useState<
+    "loading" | "idle" | "saving" | "saved" | "error"
+  >("loading");
+  // Last value known to be persisted. null = not yet loaded for this artist,
+  // which suppresses autosave so a pending edit can't write to the wrong key.
+  const lastSavedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    lastSavedRef.current = null;
+    setStatus("loading");
+    fetch(`/api/notes?artist=${encodeURIComponent(artistKey)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const n = typeof d.note === "string" ? d.note : "";
+        setNote(n);
+        lastSavedRef.current = n;
+        setStatus("idle");
+      })
+      .catch((err) => {
+        console.warn("[NOTES] hydrate failed:", err);
+        if (!cancelled) setStatus("idle");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artistKey]);
+
+  useEffect(() => {
+    if (lastSavedRef.current === null) return; // not loaded yet
+    if (note === lastSavedRef.current) return; // unchanged
+    setStatus("saving");
+    const t = setTimeout(() => {
+      fetch("/api/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artist: artistKey, note }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.error) throw new Error(d.error);
+          lastSavedRef.current = note;
+          setStatus("saved");
+        })
+        .catch((err) => {
+          console.warn("[NOTES] save failed:", err);
+          setStatus("error");
+        });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [note, artistKey]);
+
+  const statusLabel =
+    status === "saving"
+      ? "Saving…"
+      : status === "saved"
+        ? "Saved ✓"
+        : status === "error"
+          ? "Save failed — retry"
+          : status === "loading"
+            ? "Loading…"
+            : "";
+
+  return (
+    <div className="md:col-span-2 pt-3 border-t border-ink/10">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="mono text-ink/50">✎ INTERNAL NOTES</div>
+        <span
+          className={`mono text-xs ${
+            status === "error"
+              ? "text-red"
+              : status === "saved"
+                ? "text-lime"
+                : "text-ink/40"
+          }`}
+        >
+          {statusLabel}
+        </span>
+      </div>
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Team notes on this artist — outreach status, contacts, fit, anything. Autosaves as you type."
+        rows={4}
+        className="w-full bg-cream border border-ink/20 focus:border-ink/60 focus:outline-none px-3 py-2 text-sm leading-relaxed resize-y placeholder:text-ink/35"
+      />
     </div>
   );
 }

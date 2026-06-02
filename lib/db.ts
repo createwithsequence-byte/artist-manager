@@ -109,6 +109,14 @@ export async function ensureSchema(): Promise<void> {
     order_count INTEGER NOT NULL,
     updated_at TEXT NOT NULL
   )`);
+  // Internal notes — one free-text scratchpad per artist, keyed by the same
+  // stable name-first identity the customer/orders data uses. Team-authored
+  // (not AI), so it lives apart from the report blob and survives re-scouts.
+  await db.execute(`CREATE TABLE IF NOT EXISTS artist_notes (
+    artist_key TEXT PRIMARY KEY,
+    note TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
   _schemaReady = true;
 }
 
