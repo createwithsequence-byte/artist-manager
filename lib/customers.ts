@@ -1,5 +1,6 @@
 import { ensureSchema, getDb } from "./db";
 import type { CityAggregate, Customer } from "./customerCrossover";
+import type { ArtistOrder } from "./orders";
 
 /**
  * SF customer master persistence — stores pre-aggregated city roll-ups so the
@@ -201,4 +202,59 @@ export async function copyCustomerDataset(
     rowCount = r.rowCount;
   }
   return { id: toId, cityCount, rowCount };
+}
+
+/* ── Song-order ("dossier") enrichment ─────────────────────────────────────
+ * One blob of parsed ArtistOrder[] per artist, keyed by the same customerKey
+ * the routing panel uses. Replace-on-upload (a fresh export supersedes the old
+ * one), mirroring how a re-uploaded customer CSV replaces its dataset. */
+
+export async function upsertArtistOrders(
+  artistKey: string,
+  orders: ArtistOrder[],
+): Promise<{ orderCount: number }> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) throw new Error("Turso not configured");
+  const now = new Date().toISOString();
+  await db.execute({
+    sql: `INSERT INTO artist_orders (artist_key, orders, order_count, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(artist_key) DO UPDATE SET
+            orders = excluded.orders,
+            order_count = excluded.order_count,
+            updated_at = excluded.updated_at`,
+    args: [artistKey, JSON.stringify(orders), orders.length, now],
+  });
+  return { orderCount: orders.length };
+}
+
+export async function deleteArtistOrders(artistKey: string): Promise<void> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) return;
+  await db.execute({
+    sql: `DELETE FROM artist_orders WHERE artist_key = ?`,
+    args: [artistKey],
+  });
+}
+
+export async function loadArtistOrders(
+  artistKey: string,
+): Promise<ArtistOrder[]> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) return [];
+  const result = await db.execute({
+    sql: `SELECT orders FROM artist_orders WHERE artist_key = ?`,
+    args: [artistKey],
+  });
+  const row = result.rows[0];
+  if (!row) return [];
+  try {
+    const parsed = JSON.parse(String(row.orders));
+    return Array.isArray(parsed) ? (parsed as ArtistOrder[]) : [];
+  } catch {
+    return [];
+  }
 }

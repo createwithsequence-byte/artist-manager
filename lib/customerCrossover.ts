@@ -159,6 +159,9 @@ export type CustomerCrossover = {
       /** Every within-radius customer's email (uncapped, deduped at use site)
        *  for BCC outreach. Empty when the dataset has no email column. */
       emails: string[];
+      /** Every within-radius customer's user_id (uncapped) — the join key to
+       *  the song-order dossier. Empty when the dataset has no user_id column. */
+      userIds: string[];
     }>;
     lat?: number;
     lng?: number;
@@ -538,6 +541,7 @@ export function crossover(
         isSameCity: boolean;
         names: string[];
         emails: string[];
+        userIds: string[];
       }
     >();
     if (coords) {
@@ -557,6 +561,7 @@ export function crossover(
               isSameCity: c._cityKey === bareCity && c._stateCode === stateCode,
               names: [],
               emails: [],
+              userIds: [],
             };
             nearbyMap.set(ckey, b);
           }
@@ -565,6 +570,9 @@ export function crossover(
           // Uncapped — a BCC list must reach every fan, not just the 12 shown.
           const em = customerEmail(c);
           if (em) b.emails.push(em);
+          // Uncapped join key for the dossier — every fan, not a sample.
+          const uid = customerUserId(c);
+          if (uid) b.userIds.push(uid);
         }
       });
     }
@@ -801,6 +809,20 @@ export function customerEmail(c: Customer): string | undefined {
   for (const k of Object.keys(raw)) {
     const v = (raw[k] ?? "").trim();
     if (EMAIL_RE.test(v)) return v.toLowerCase();
+  }
+  return undefined;
+}
+
+/** The customer's user_id from their raw CSV row — the join key to the
+ *  song-order dossier. Tolerant of header casing. */
+export function customerUserId(c: Customer): string | undefined {
+  const raw = c.raw;
+  if (!raw) return undefined;
+  for (const k of Object.keys(raw)) {
+    if (/^user[_ ]?id$/i.test(k.trim())) {
+      const v = (raw[k] ?? "").trim();
+      if (v) return v;
+    }
   }
   return undefined;
 }

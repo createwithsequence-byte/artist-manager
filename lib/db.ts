@@ -98,6 +98,17 @@ export async function ensureSchema(): Promise<void> {
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_saved_tour_artist ON saved_tour(artist_key)`,
   );
+  // Song-order "dossier" data — one blob of parsed ArtistOrder[] per artist,
+  // joined to the contact dataset by user_id at read time. Separate from
+  // customer_dataset because it's an optional enrichment (not every artist
+  // uploads orders) and the blob is multi-MB (stories are long) — only the
+  // routing panel's dossier view loads it, never the home chip or globe.
+  await db.execute(`CREATE TABLE IF NOT EXISTS artist_orders (
+    artist_key TEXT PRIMARY KEY,
+    orders TEXT NOT NULL,
+    order_count INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
   _schemaReady = true;
 }
 

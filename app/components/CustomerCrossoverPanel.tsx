@@ -18,6 +18,12 @@ import {
 } from "@/lib/customerCrossover";
 import type { Event as ArtistEvent } from "@/lib/types";
 import type { SavedTour } from "@/lib/savedTours";
+import {
+  parseOrders,
+  ordersByUser,
+  firstName,
+  type ArtistOrder,
+} from "@/lib/orders";
 import { TourChat } from "./TourChat";
 import { buildTourContext, type ProposedStop } from "@/lib/tourChat";
 
@@ -499,6 +505,86 @@ function RoutingSheet({
   // Transient one-liner under the control ("Saved · …", "Loaded · …").
   const [saveNote, setSaveNote] = useState<string | null>(null);
 
+  // Song-order dossier — per-artist enrichment joined to fans by user_id. The
+  // contact dataset drives routing; this lights up "who this fan is" per stop.
+  const [orders, setOrders] = useState<ArtistOrder[]>([]);
+  const [ordersBusy, setOrdersBusy] = useState(false);
+  const ordersInputRef = useRef<HTMLInputElement>(null);
+  const ordersMap = useMemo(() => ordersByUser(orders), [orders]);
+  // The stop whose dossier overlay is open (null = closed).
+  const [dossierStop, setDossierStop] = useState<
+    CustomerCrossover["perEvent"][number] | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/orders?artist=${encodeURIComponent(customerKey)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && Array.isArray(d.orders)) setOrders(d.orders);
+      })
+      .catch((err) => console.warn("[ORDERS] hydrate failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [customerKey]);
+
+  // Parse the orders CSV client-side (Papa handles the multi-line quoted
+  // stories), shrink to lean ArtistOrder[] (drops the fat audio blobs), persist,
+  // and light up the dossier. Replace-on-upload.
+  const onOrdersFile = (file: File) => {
+    setOrdersBusy(true);
+    Papa.parse<Record<string, string>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => {
+        const parsed = parseOrders(res.data);
+        if (parsed.length === 0) {
+          setOrdersBusy(false);
+          return;
+        }
+        // Byte-aware chunks (~2MB each) keep every POST under Vercel's 4.5MB
+        // request-body cap. First chunk replaces; the rest append.
+        const chunks: ArtistOrder[][] = [];
+        let cur: ArtistOrder[] = [];
+        let bytes = 0;
+        for (const o of parsed) {
+          const sz = (o.story?.length ?? 0) + 200;
+          if (bytes + sz > 2_000_000 && cur.length) {
+            chunks.push(cur);
+            cur = [];
+            bytes = 0;
+          }
+          cur.push(o);
+          bytes += sz;
+        }
+        if (cur.length) chunks.push(cur);
+        (async () => {
+          for (let i = 0; i < chunks.length; i++) {
+            const r = await fetch("/api/orders", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                artist: customerKey,
+                orders: chunks[i],
+                mode: i === 0 ? "replace" : "append",
+              }),
+            });
+            const d = await r.json();
+            if (d.error) throw new Error(d.error);
+          }
+          setOrders(parsed);
+        })()
+          .catch((err) => console.warn("[ORDERS] save failed:", err))
+          .finally(() => setOrdersBusy(false));
+      },
+      error: (err) => {
+        console.warn("[ORDERS] parse failed:", err);
+        setOrdersBusy(false);
+      },
+    });
+  };
+
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/tours?artist=${encodeURIComponent(customerKey)}`)
@@ -923,6 +1009,36 @@ function RoutingSheet({
             )}
           </div>
 
+          {/* Song-story dossier loader — upload this artist's orders CSV to
+              enrich every stop's fans with the songs the artist made them. */}
+          <input
+            ref={ordersInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onOrdersFile(f);
+              e.target.value = "";
+            }}
+          />
+          <button
+            className="rs-saved-btn"
+            onClick={() => ordersInputRef.current?.click()}
+            disabled={ordersBusy}
+            title={
+              orders.length
+                ? `${orders.length} song stories loaded — click to replace`
+                : "Load this artist's song orders to build per-stop fan dossiers"
+            }
+          >
+            {ordersBusy
+              ? "Loading…"
+              : orders.length
+                ? `📋 ${orders.length} stories`
+                : "＋ Song stories"}
+          </button>
+
           {/* Jump to this artist's own Songfinch World globe — same dataset,
               spatial lens. Opens the per-artist /customers view. */}
           <a
@@ -1304,6 +1420,8 @@ function RoutingSheet({
                   artistName={artistName}
                   radiusMiles={radiusMiles}
                   maxReach={maxReach}
+                  ordersMap={ordersMap}
+                  onOpenDossier={() => setDossierStop(show)}
                   provisional={provisionalKeys.has(
                     `${show.event.date}|${show.event.city}`,
                   )}
@@ -1384,6 +1502,15 @@ function RoutingSheet({
         rank routing. Customers without a recognizable US city aren&apos;t
         plotted.
       </div>
+
+      {dossierStop && (
+        <DossierModal
+          show={dossierStop}
+          ordersMap={ordersMap}
+          artistName={artistName}
+          onClose={() => setDossierStop(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1428,6 +1555,41 @@ function buildFanEmail(
   return { emails, subject, body };
 }
 
+type DossierEntry = {
+  userId: string;
+  name: string;
+  city: string;
+  stateCode: string;
+  orders: ArtistOrder[];
+};
+
+/** Join a stop's within-radius fans (by user_id, from the engine's nearby
+ *  buckets) to their song orders, keep only fans who actually have songs, and
+ *  rank by how many they ordered — the patrons surface first. */
+function dossierEntriesFor(
+  show: CustomerCrossover["perEvent"][number],
+  ordersMap: Map<string, ArtistOrder[]>,
+): DossierEntry[] {
+  if (ordersMap.size === 0) return [];
+  const seen = new Map<string, DossierEntry>();
+  for (const b of show.nearby ?? []) {
+    for (const uid of b.userIds ?? []) {
+      if (seen.has(uid)) continue;
+      const found = ordersMap.get(uid);
+      if (found && found.length > 0) {
+        seen.set(uid, {
+          userId: uid,
+          name: found[0].customerName || "Fan",
+          city: b.city,
+          stateCode: b.stateCode,
+          orders: found,
+        });
+      }
+    }
+  }
+  return [...seen.values()].sort((a, b) => b.orders.length - a.orders.length);
+}
+
 // ── show row ────────────────────────────────────────────────────────────────
 function ShowRow({
   show,
@@ -1437,6 +1599,8 @@ function ShowRow({
   maxReach,
   provisional,
   selected,
+  ordersMap,
+  onOpenDossier,
   onRemove,
   onSelect,
 }: {
@@ -1447,6 +1611,8 @@ function ShowRow({
   maxReach: number;
   provisional: boolean;
   selected: boolean;
+  ordersMap: Map<string, ArtistOrder[]>;
+  onOpenDossier: () => void;
   onRemove?: () => void;
   onSelect: () => void;
 }) {
@@ -1459,6 +1625,12 @@ function ShowRow({
   const secondary = nearby.filter((n) => !n.isSameCity);
   const hasWho = nearby.length > 0;
   const nearbyCount = Math.max(0, show.withinRadiusCount - show.sameCityCount);
+
+  // How many of this stop's fans have song stories (dossier reach).
+  const dossierCount = useMemo(
+    () => dossierEntriesFor(show, ordersMap).length,
+    [show, ordersMap],
+  );
 
   // Deduped count of fans with an email — the BCC reach for this stop.
   const fanEmailCount = useMemo(
@@ -1548,6 +1720,18 @@ function ShowRow({
                 }}
               >
                 {whoOpen ? "▾ Fans" : "▸ Fans"}
+              </button>
+            )}
+            {dossierCount > 0 && (
+              <button
+                className="rs-dossier-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenDossier();
+                }}
+                title={`Open the fan dossier — ${dossierCount} ${dossierCount === 1 ? "fan here has" : "fans here have"} a song from ${artistName}`}
+              >
+                📋 Dossier · {dossierCount}
               </button>
             )}
             {onRemove && (
@@ -1855,6 +2039,170 @@ function UntappedShelf({
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ── fan dossier ───────────────────────────────────────────────────────────────
+// The "I remember your song" view: for one stop, every nearby fan who has a
+// song from this artist, ranked by how many they ordered, with the occasion,
+// recipient, and the story the artist wrote from.
+function DossierModal({
+  show,
+  ordersMap,
+  artistName,
+  onClose,
+}: {
+  show: CustomerCrossover["perEvent"][number];
+  ordersMap: Map<string, ArtistOrder[]>;
+  artistName: string;
+  onClose: () => void;
+}) {
+  const entries = useMemo(
+    () => dossierEntriesFor(show, ordersMap),
+    [show, ordersMap],
+  );
+  const totalSongs = useMemo(
+    () => entries.reduce((n, e) => n + e.orders.length, 0),
+    [entries],
+  );
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const city = show.event.city || "?";
+  const dt = new Date(`${show.event.date}T12:00:00`);
+  const dateStr = isNaN(dt.getTime())
+    ? show.event.date
+    : dt.toLocaleDateString("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      });
+  const venue =
+    show.event.venue && show.event.venue !== "PROVISIONAL"
+      ? show.event.venue
+      : "";
+
+  return (
+    <div className="dossier-overlay" onClick={onClose}>
+      <div
+        className="dossier-sheet"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Fan dossier for ${city}`}
+      >
+        <div className="dossier-head">
+          <div>
+            <div className="dossier-kicker">Fan Dossier · {artistName}</div>
+            <div className="dossier-title">
+              {city}
+              {show.stateCode ? `, ${show.stateCode}` : ""}
+            </div>
+            <div className="dossier-sub">
+              {venue ? `${venue} · ` : ""}
+              {dateStr}
+            </div>
+          </div>
+          <div className="dossier-headmeta">
+            <span className="dossier-count">
+              {entries.length} fan{entries.length === 1 ? "" : "s"} ·{" "}
+              {totalSongs} song{totalSongs === 1 ? "" : "s"}
+            </span>
+            <button
+              className="dossier-print"
+              onClick={() => window.print()}
+              title="Print or save this dossier to bring to the show"
+            >
+              ⎙ Print
+            </button>
+            <button
+              className="dossier-x"
+              onClick={onClose}
+              aria-label="Close dossier"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+        <div className="dossier-body">
+          {entries.length === 0 ? (
+            <div className="dossier-empty">
+              None of this stop&apos;s fans have a song in the loaded orders.
+              Try a wider radius, or re-check the orders upload.
+            </div>
+          ) : (
+            entries.map((e) => <DossierCard key={e.userId} entry={e} />)
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DossierCard({ entry }: { entry: DossierEntry }) {
+  const vip = entry.orders.length > 1;
+  return (
+    <div className="dossier-card">
+      <div className="dossier-card-head">
+        <span className="dossier-name">{entry.name}</span>
+        <span className="dossier-loc">
+          {entry.city}, {entry.stateCode}
+        </span>
+        {vip && (
+          <span className="dossier-vip">★ {entry.orders.length} songs</span>
+        )}
+      </div>
+      {entry.orders.map((o, i) => (
+        <DossierSong key={i} order={o} />
+      ))}
+    </div>
+  );
+}
+
+function DossierSong({ order }: { order: ArtistOrder }) {
+  const [open, setOpen] = useState(false);
+  // Strip the form-field markdown bold ("**Your relationship story**") to plain
+  // headers; keep newlines (rendered pre-wrap) so the brief stays readable.
+  const story = (order.story || "").replace(/\*\*/g, "").trim();
+  const isLong = story.length > 320;
+  const shown = open || !isLong ? story : `${story.slice(0, 320).trimEnd()}…`;
+  const recip = order.recipientName
+    ? `for ${order.recipientName}${order.relationship ? ` (${order.relationship})` : ""}`
+    : "";
+  return (
+    <div className="dossier-song">
+      <div className="dossier-song-head">
+        {order.occasion && (
+          <span className="dossier-occ">{order.occasion}</span>
+        )}
+        {order.songTitle && (
+          <span className="dossier-songtitle">“{order.songTitle}”</span>
+        )}
+        {recip && <span className="dossier-recip">{recip}</span>}
+        {order.genre && <span className="dossier-genre">{order.genre}</span>}
+        {order.rating != null && (
+          <span className="dossier-rating" title={`${order.rating}/5`}>
+            {"★".repeat(order.rating)}
+            {"☆".repeat(5 - order.rating)}
+          </span>
+        )}
+      </div>
+      {story && (
+        <div className="dossier-story">
+          {shown}
+          {isLong && (
+            <button className="dossier-more" onClick={() => setOpen((v) => !v)}>
+              {open ? "  show less" : "  show more"}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
