@@ -1394,3 +1394,198 @@ body {
     display: none;
   }
 }
+
+/* ── Broadcast composer ───────────────────────────────────────────────────── */
+.broadcast-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5vh 16px;
+  background: rgba(10, 10, 10, 0.55);
+  overflow-y: auto;
+}
+.broadcast-sheet {
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--rs-surface, #fff);
+  border: 1px solid var(--rs-ink, #1a1a18);
+  border-top: 3px solid var(--rs-blue, #1e2ddb);
+}
+.broadcast-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rs-line-strong, #e0e0da);
+}
+.broadcast-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rs-blue, #1e2ddb);
+}
+.broadcast-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--rs-ink, #1a1a18);
+  margin-top: 2px;
+}
+.broadcast-x {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--rs-ink-2, #5c5c56);
+  background: transparent;
+  border: 1px solid var(--rs-line-strong, #e0e0da);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.broadcast-x:hover {
+  border-color: var(--rs-ink, #1a1a18);
+}
+.broadcast-body {
+  overflow-y: auto;
+  padding: 14px 18px 18px;
+}
+.broadcast-field {
+  margin-bottom: 12px;
+}
+.broadcast-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-ink-3, #9b9b94);
+  margin-bottom: 5px;
+}
+.broadcast-aud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.broadcast-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--rs-ink-2, #5c5c56);
+  background: var(--rs-surface, #fff);
+  border: 1px solid var(--rs-line-strong, #e0e0da);
+  border-radius: 4px;
+  padding: 4px 9px;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+.broadcast-pill:hover {
+  border-color: var(--rs-ink, #1a1a18);
+}
+.broadcast-pill.active {
+  background: var(--rs-ink, #1a1a18);
+  color: #fff;
+  border-color: var(--rs-ink, #1a1a18);
+}
+.broadcast-input {
+  width: 100%;
+  font-size: 14px;
+  color: var(--rs-ink, #1a1a18);
+  background: var(--rs-surface, #fff);
+  border: 1px solid var(--rs-line-strong, #e0e0da);
+  padding: 8px 10px;
+}
+.broadcast-input:focus {
+  outline: none;
+  border-color: var(--rs-ink, #1a1a18);
+}
+.broadcast-textarea {
+  resize: vertical;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.broadcast-send {
+  border-top: 1px solid var(--rs-line, #ececea);
+  padding-top: 14px;
+  margin-top: 4px;
+}
+.broadcast-recip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--rs-ink-2, #5c5c56);
+  margin-bottom: 8px;
+}
+.broadcast-go {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: var(--rs-blue, #1e2ddb);
+  border: 0;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+.broadcast-go:hover {
+  background: var(--rs-ink, #1a1a18);
+}
+.broadcast-batches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.broadcast-batch {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--rs-blue, #1e2ddb);
+  background: transparent;
+  border: 1px solid var(--rs-blue, #1e2ddb);
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.broadcast-batch:hover {
+  background: var(--rs-blue, #1e2ddb);
+  color: #fff;
+}
+.broadcast-alt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+}
+.broadcast-alt button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--rs-ink-2, #5c5c56);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rs-line-strong, #e0e0da);
+  padding-bottom: 1px;
+  cursor: pointer;
+}
+.broadcast-alt button:hover {
+  color: var(--rs-ink, #1a1a18);
+  border-color: var(--rs-ink, #1a1a18);
+}
+.broadcast-note {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 12px;
+  color: var(--rs-ink-3, #9b9b94);
+  margin-top: 10px;
+  line-height: 1.45;
+}
+.broadcast-note.err {
+  color: var(--rs-red, #f23222);
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

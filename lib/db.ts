@@ -117,6 +117,14 @@ export async function ensureSchema(): Promise<void> {
     note TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`);
+  // Announcements — a per-artist list of upcoming releases / tours / merch /
+  // news the team writes in, to broadcast to the fanbase. Stored as one small
+  // JSON list per artist (a handful of items), replace-on-save.
+  await db.execute(`CREATE TABLE IF NOT EXISTS artist_updates (
+    artist_key TEXT PRIMARY KEY,
+    updates TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`);
   _schemaReady = true;
 }
 

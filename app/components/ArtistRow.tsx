@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArtistReport, Signal } from "@/lib/types";
 import { customerKeys } from "@/lib/identity";
+import { customerEmail, type Customer } from "@/lib/customerCrossover";
+import {
+  ANNOUNCEMENT_LABEL,
+  buildBroadcastEmail,
+  type Announcement,
+  type AnnouncementType,
+} from "@/lib/updates";
 import { CustomerCrossoverPanel } from "./CustomerCrossoverPanel";
 
 const SIGNAL_CONFIG: Record<
@@ -252,6 +259,11 @@ export function ArtistRow({
           )}
 
           <NotesSection artistKey={customerKeys(report)[0]} />
+
+          <AnnouncementsSection
+            artistKey={customerKeys(report)[0]}
+            artistName={report.name}
+          />
 
           <Section title="01 — UPCOMING">
             {(report.events ?? []).length === 0 ? (
@@ -522,6 +534,514 @@ function NotesSection({ artistKey }: { artistKey: string }) {
       />
     </div>
   );
+}
+
+// Per-artist announcements — write in releases/tours/merch/news, then broadcast
+// to the fanbase (compose + hand off, never auto-send).
+function AnnouncementsSection({
+  artistKey,
+  artistName,
+}: {
+  artistKey: string;
+  artistName: string;
+}) {
+  const [items, setItems] = useState<Announcement[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [broadcast, setBroadcast] = useState<Announcement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/updates?artist=${encodeURIComponent(artistKey)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (Array.isArray(d.updates)) setItems(d.updates);
+        setLoaded(true);
+      })
+      .catch((err) => {
+        console.warn("[UPDATES] hydrate failed:", err);
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artistKey]);
+
+  const persist = (next: Announcement[]) => {
+    setItems(next);
+    fetch("/api/updates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ artist: artistKey, updates: next }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) throw new Error(d.error);
+      })
+      .catch((err) => console.warn("[UPDATES] save failed:", err));
+  };
+
+  const addItem = (draft: Omit<Announcement, "id" | "createdAt">) => {
+    const item: Announcement = {
+      ...draft,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    };
+    persist([item, ...items]);
+    setAdding(false);
+  };
+
+  return (
+    <div className="md:col-span-2 pt-3 border-t border-ink/10">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="mono text-ink/50">📣 ANNOUNCEMENTS</div>
+        <button
+          onClick={() => setAdding((v) => !v)}
+          className="mono text-xs border border-ink/25 hover:border-ink/60 px-2 py-0.5 transition-colors"
+        >
+          {adding ? "✕ Cancel" : "＋ Add"}
+        </button>
+      </div>
+      {adding && (
+        <AnnouncementForm onAdd={addItem} onCancel={() => setAdding(false)} />
+      )}
+      {loaded && items.length === 0 && !adding && (
+        <div className="serif-italic text-ink/50 text-sm">
+          Nothing queued. Add a release, tour, merch drop, or bit of news, then
+          broadcast it to the fanbase.
+        </div>
+      )}
+      <div className="space-y-2 mt-2">
+        {items.map((a) => (
+          <AnnouncementItem
+            key={a.id}
+            a={a}
+            onDelete={() => persist(items.filter((i) => i.id !== a.id))}
+            onBroadcast={() => setBroadcast(a)}
+          />
+        ))}
+      </div>
+      {broadcast && (
+        <BroadcastComposer
+          announcement={broadcast}
+          artistName={artistName}
+          artistKey={artistKey}
+          onClose={() => setBroadcast(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+const ANNOUNCEMENT_TYPES: AnnouncementType[] = [
+  "release",
+  "tour",
+  "merch",
+  "news",
+];
+
+function AnnouncementForm({
+  onAdd,
+  onCancel,
+}: {
+  onAdd: (a: Omit<Announcement, "id" | "createdAt">) => void;
+  onCancel: () => void;
+}) {
+  const [type, setType] = useState<AnnouncementType>("release");
+  const [headline, setHeadline] = useState("");
+  const [date, setDate] = useState("");
+  const [url, setUrl] = useState("");
+  const [blurb, setBlurb] = useState("");
+  const inputCls =
+    "w-full bg-cream border border-ink/20 focus:border-ink/60 focus:outline-none px-2.5 py-1.5 text-sm";
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!headline.trim()) return;
+        onAdd({
+          type,
+          headline: headline.trim(),
+          ...(date.trim() ? { date: date.trim() } : {}),
+          ...(url.trim() ? { url: url.trim() } : {}),
+          ...(blurb.trim() ? { blurb: blurb.trim() } : {}),
+        });
+      }}
+      className="border border-ink/15 p-3 mb-2 space-y-2 bg-ink/[0.015]"
+    >
+      <div className="flex gap-2">
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value as AnnouncementType)}
+          className="mono text-xs bg-cream border border-ink/20 px-2 py-1.5"
+        >
+          {ANNOUNCEMENT_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {ANNOUNCEMENT_LABEL[t]}
+            </option>
+          ))}
+        </select>
+        <input
+          value={headline}
+          onChange={(e) => setHeadline(e.target.value)}
+          placeholder="Headline (e.g. new single 'Think Of Me')"
+          className={inputCls}
+          autoFocus
+        />
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          placeholder="When (optional)"
+          className={inputCls}
+        />
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Link (optional)"
+          className={inputCls}
+        />
+      </div>
+      <textarea
+        value={blurb}
+        onChange={(e) => setBlurb(e.target.value)}
+        placeholder="Details (optional)"
+        rows={2}
+        className={`${inputCls} resize-y`}
+      />
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={!headline.trim()}
+          className="mono text-xs px-3 h-8 bg-ink text-cream hover:bg-blue transition-colors disabled:opacity-30"
+        >
+          SAVE
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="mono text-xs px-3 h-8 border border-ink/25 hover:border-ink/60 transition-colors"
+        >
+          CANCEL
+        </button>
+      </div>
+    </form>
+  );
+}
+
+const TYPE_CHIP: Record<AnnouncementType, string> = {
+  release: "border-blue/60 text-blue",
+  tour: "border-red/60 text-red",
+  merch: "border-lime/70 text-ink bg-lime/10",
+  news: "border-ink/40 text-ink/70",
+};
+
+function AnnouncementItem({
+  a,
+  onDelete,
+  onBroadcast,
+}: {
+  a: Announcement;
+  onDelete: () => void;
+  onBroadcast: () => void;
+}) {
+  return (
+    <div className="flex items-start gap-3 border border-ink/12 px-3 py-2">
+      <span
+        className={`mono text-[0.6rem] border px-1.5 py-0.5 mt-0.5 shrink-0 ${TYPE_CHIP[a.type]}`}
+      >
+        {ANNOUNCEMENT_LABEL[a.type]}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-medium">
+          {a.headline}
+          {a.date && <span className="text-ink/45 text-sm"> · {a.date}</span>}
+        </div>
+        {a.blurb && (
+          <div className="serif-italic text-ink/65 text-sm mt-0.5">
+            {a.blurb}
+          </div>
+        )}
+        {a.url && (
+          <a
+            href={a.url}
+            target="_blank"
+            rel="noopener"
+            className="mono text-xs text-blue hover:underline break-all"
+          >
+            {a.url} ↗
+          </a>
+        )}
+      </div>
+      <button
+        onClick={onBroadcast}
+        className="mono text-xs px-2.5 h-8 border border-blue/50 text-blue hover:bg-blue hover:text-cream transition-colors shrink-0"
+        title="Compose a fanbase email about this"
+      >
+        ✉ Email fans
+      </button>
+      <button
+        onClick={onDelete}
+        className="mono text-ink/35 hover:text-red shrink-0 px-1"
+        title="Delete"
+        aria-label={`Delete ${a.headline}`}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// Compose a fanbase broadcast: pick audience (all / a state), review/edit the
+// email, then hand off — Gmail compose for small sends, batched + copy/CSV for
+// big ones. Never sends on its own.
+function BroadcastComposer({
+  announcement,
+  artistName,
+  artistKey,
+  onClose,
+}: {
+  announcement: Announcement;
+  artistName: string;
+  artistKey: string;
+  onClose: () => void;
+}) {
+  const [fans, setFans] = useState<Customer[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [audience, setAudience] = useState<string>("all"); // "all" | state name
+  const seeded = buildBroadcastEmail(announcement, artistName);
+  const [subject, setSubject] = useState(seeded.subject);
+  const [body, setBody] = useState(seeded.body);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/customers?id=${encodeURIComponent(artistKey)}&raw=1`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (Array.isArray(d.raw) && d.raw.length > 0) setFans(d.raw);
+        else {
+          setFans([]);
+          setLoadErr("No fanbase uploaded for this artist yet.");
+        }
+      })
+      .catch((err) => {
+        console.warn("[BROADCAST] fanbase load failed:", err);
+        if (!cancelled) {
+          setFans([]);
+          setLoadErr("Couldn't load the fanbase.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [artistKey]);
+
+  // States present, by reachable-fan count (only those with an email).
+  const states = useMemo(() => {
+    if (!fans) return [];
+    const m = new Map<string, number>();
+    for (const c of fans) {
+      const s = (c.state || "").trim();
+      if (s && customerEmail(c)) m.set(s, (m.get(s) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [fans]);
+
+  // Deduped recipient emails for the chosen audience.
+  const emails = useMemo(() => {
+    if (!fans) return [];
+    const set = new Set<string>();
+    for (const c of fans) {
+      if (audience !== "all" && (c.state || "").trim() !== audience) continue;
+      const e = customerEmail(c);
+      if (e) set.add(e);
+    }
+    return [...set];
+  }, [fans, audience]);
+
+  const GMAIL_CAP = 400;
+  const batches = Math.max(1, Math.ceil(emails.length / GMAIL_CAP));
+  const su = encodeURIComponent(subject);
+  const bd = encodeURIComponent(body);
+  const openGmail = (slice: string[]) =>
+    window.open(
+      `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(slice.join(","))}&su=${su}&body=${bd}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  const copyEmails = () =>
+    navigator.clipboard
+      ?.writeText(emails.join(", "))
+      .catch((err) => console.warn("[BROADCAST] copy failed:", err));
+  const downloadCsv = () => {
+    const csv = `email\n${emails.join("\n")}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const u = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = u;
+    const seg = audience === "all" ? "all" : audience;
+    a.download = `${artistName.replace(/\W+/g, "-").toLowerCase()}-${seg.replace(/\W+/g, "-").toLowerCase()}-emails.csv`;
+    a.click();
+    URL.revokeObjectURL(u);
+  };
+
+  return (
+    <div className="broadcast-overlay" onClick={onClose}>
+      <div
+        className="broadcast-sheet"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="broadcast-head">
+          <div>
+            <div className="broadcast-kicker">
+              Broadcast · {ANNOUNCEMENT_LABEL[announcement.type]}
+            </div>
+            <div className="broadcast-title">{announcement.headline}</div>
+          </div>
+          <button className="broadcast-x" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="broadcast-body">
+          {/* Audience */}
+          <div className="broadcast-field">
+            <div className="broadcast-label">Audience</div>
+            <div className="broadcast-aud">
+              <button
+                className={`broadcast-pill${audience === "all" ? " active" : ""}`}
+                onClick={() => setAudience("all")}
+              >
+                All fans{fans ? ` · ${totalReachable(fans)}` : ""}
+              </button>
+              {states.slice(0, 8).map(([s, n]) => (
+                <button
+                  key={s}
+                  className={`broadcast-pill${audience === s ? " active" : ""}`}
+                  onClick={() => setAudience(s)}
+                >
+                  {s} · {n}
+                </button>
+              ))}
+              {states.length > 8 && (
+                <select
+                  value={states.some(([s]) => s === audience) ? audience : ""}
+                  onChange={(e) =>
+                    e.target.value && setAudience(e.target.value)
+                  }
+                  className="broadcast-pill"
+                >
+                  <option value="">more states…</option>
+                  {states.slice(8).map(([s, n]) => (
+                    <option key={s} value={s}>
+                      {s} · {n}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {/* Message */}
+          <div className="broadcast-field">
+            <div className="broadcast-label">Subject</div>
+            <input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              className="broadcast-input"
+            />
+          </div>
+          <div className="broadcast-field">
+            <div className="broadcast-label">Message</div>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={9}
+              className="broadcast-input broadcast-textarea"
+            />
+          </div>
+
+          {/* Handoff */}
+          <div className="broadcast-send">
+            {fans === null ? (
+              <div className="broadcast-note">Loading fanbase…</div>
+            ) : loadErr ? (
+              <div className="broadcast-note err">{loadErr}</div>
+            ) : emails.length === 0 ? (
+              <div className="broadcast-note">
+                No reachable emails in this audience.
+              </div>
+            ) : (
+              <>
+                <div className="broadcast-recip">
+                  {emails.length.toLocaleString()} recipient
+                  {emails.length === 1 ? "" : "s"}
+                  {batches > 1
+                    ? ` · ${batches} Gmail batches of ≤${GMAIL_CAP}`
+                    : ""}
+                </div>
+                {emails.length <= GMAIL_CAP ? (
+                  <button
+                    className="broadcast-go"
+                    onClick={() => openGmail(emails)}
+                  >
+                    ✉ Open in Gmail · {emails.length} BCC&apos;d
+                  </button>
+                ) : (
+                  <div className="broadcast-batches">
+                    {Array.from({ length: batches }, (_, i) => (
+                      <button
+                        key={i}
+                        className="broadcast-batch"
+                        onClick={() =>
+                          openGmail(
+                            emails.slice(i * GMAIL_CAP, (i + 1) * GMAIL_CAP),
+                          )
+                        }
+                      >
+                        Gmail {i + 1}/{batches}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="broadcast-alt">
+                  <button onClick={copyEmails}>⎘ Copy all emails</button>
+                  <button onClick={downloadCsv}>⇣ CSV for your ESP</button>
+                </div>
+                <div className="broadcast-note">
+                  Nothing sends automatically. Big lists: paste the CSV into
+                  Klaviyo/Mailchimp (they handle unsubscribe), or fire the Gmail
+                  batches one at a time.
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function totalReachable(fans: Customer[]): number {
+  const set = new Set<string>();
+  for (const c of fans) {
+    const e = customerEmail(c);
+    if (e) set.add(e);
+  }
+  return set.size;
 }
 
 const CATEGORY_LABEL: Record<string, string> = {

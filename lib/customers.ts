@@ -1,6 +1,7 @@
 import { ensureSchema, getDb } from "./db";
 import type { CityAggregate, Customer } from "./customerCrossover";
 import type { ArtistOrder } from "./orders";
+import type { Announcement } from "./updates";
 
 /**
  * SF customer master persistence — stores pre-aggregated city roll-ups so the
@@ -288,5 +289,43 @@ export async function saveArtistNote(
             note = excluded.note,
             updated_at = excluded.updated_at`,
     args: [artistKey, note, now],
+  });
+}
+
+/* ── Per-artist announcements (broadcast list) ─────────────────────────────── */
+
+export async function loadUpdates(artistKey: string): Promise<Announcement[]> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) return [];
+  const result = await db.execute({
+    sql: `SELECT updates FROM artist_updates WHERE artist_key = ?`,
+    args: [artistKey],
+  });
+  const row = result.rows[0];
+  if (!row) return [];
+  try {
+    const parsed = JSON.parse(String(row.updates));
+    return Array.isArray(parsed) ? (parsed as Announcement[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveUpdates(
+  artistKey: string,
+  updates: Announcement[],
+): Promise<void> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) throw new Error("Turso not configured");
+  const now = new Date().toISOString();
+  await db.execute({
+    sql: `INSERT INTO artist_updates (artist_key, updates, updated_at)
+          VALUES (?, ?, ?)
+          ON CONFLICT(artist_key) DO UPDATE SET
+            updates = excluded.updates,
+            updated_at = excluded.updated_at`,
+    args: [artistKey, JSON.stringify(updates), now],
   });
 }
