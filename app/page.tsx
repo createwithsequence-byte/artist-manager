@@ -134,12 +134,20 @@ export default function Home() {
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d?.datasets) && d.datasets.length > 0) {
-          const totalFans = d.datasets.reduce(
-            (s: number, x: { customerCount?: number }) =>
-              s + (x.customerCount || 0),
-            0,
+          // Exclude the legacy global "master": adopt-master server-copies its
+          // count onto a per-artist row WITHOUT deleting master, so summing
+          // both double-counts the same fans on every adoption.
+          const worlds = d.datasets.filter(
+            (x: { id?: string }) => x.id !== "master",
           );
-          setWorldStats({ worldCount: d.datasets.length, totalFans });
+          if (worlds.length > 0) {
+            const totalFans = worlds.reduce(
+              (s: number, x: { customerCount?: number }) =>
+                s + (x.customerCount || 0),
+              0,
+            );
+            setWorldStats({ worldCount: worlds.length, totalFans });
+          }
         }
       })
       .catch((err) =>
@@ -1077,11 +1085,7 @@ export default function Home() {
           setWithSocials={setWithSocials}
           inProgressLabel={currentStatus}
           inProgressCount={
-            state === "scouting"
-              ? thisRunSize -
-                reports.filter((r) => scoutedNames.has(r.name.toLowerCase()))
-                  .length
-              : 0
+            state === "scouting" ? Math.max(0, thisRunSize - completed) : 0
           }
           onRun={runScout}
           onStop={stopLoop}

@@ -61,6 +61,8 @@ export async function POST(req: NextRequest) {
     customerCount?: number;
     raw?: Customer[];
     copyFrom?: string;
+    rawChunk?: Customer[];
+    rawMode?: "replace" | "append";
   };
   try {
     body = (await req.json()) as typeof body;
@@ -77,6 +79,28 @@ export async function POST(req: NextRequest) {
     try {
       const result = await copyCustomerDataset(body.copyFrom.trim(), id, name);
       return Response.json({ ok: true, ...result });
+    } catch (err) {
+      return Response.json(
+        { error: err instanceof Error ? err.message : String(err) },
+        { status: 500 },
+      );
+    }
+  }
+
+  // Chunked raw upload: stream large rosters under Vercel's 4.5MB body cap.
+  // "replace" starts fresh; "append" concatenates onto the existing raw. The
+  // aggregate is sent separately as a final commit (the branch below), so it
+  // only updates after every raw chunk lands — no globe/raw desync on partial
+  // failure. Each chunk surfaces its own error to the client.
+  if (Array.isArray(body.rawChunk)) {
+    try {
+      const mode = body.rawMode === "append" ? "append" : "replace";
+      const merged =
+        mode === "append"
+          ? ((await loadCustomerDatasetRaw(id)) ?? []).concat(body.rawChunk)
+          : body.rawChunk;
+      const r = await upsertCustomerDatasetRaw(id, merged);
+      return Response.json({ ok: true, rowCount: r.rowCount });
     } catch (err) {
       return Response.json(
         { error: err instanceof Error ? err.message : String(err) },

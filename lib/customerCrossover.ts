@@ -162,6 +162,10 @@ export type CustomerCrossover = {
       /** Every within-radius customer's user_id (uncapped) — the join key to
        *  the song-order dossier. Empty when the dataset has no user_id column. */
       userIds: string[];
+      /** Every within-radius customer paired as {name,email}, UNCAPPED — the
+       *  complete list the mailing-list export iterates (names[] is capped at
+       *  12 for display only, which silently truncated the CSV). */
+      fans: { name: string; email: string }[];
     }>;
     lat?: number;
     lng?: number;
@@ -542,6 +546,7 @@ export function crossover(
         names: string[];
         emails: string[];
         userIds: string[];
+        fans: { name: string; email: string }[];
       }
     >();
     if (coords) {
@@ -562,6 +567,7 @@ export function crossover(
               names: [],
               emails: [],
               userIds: [],
+              fans: [],
             };
             nearbyMap.set(ckey, b);
           }
@@ -573,6 +579,8 @@ export function crossover(
           // Uncapped join key for the dossier — every fan, not a sample.
           const uid = customerUserId(c);
           if (uid) b.userIds.push(uid);
+          // Uncapped {name,email} for the complete mailing-list export.
+          b.fans.push({ name: c.name ?? "", email: em ?? "" });
         }
       });
     }

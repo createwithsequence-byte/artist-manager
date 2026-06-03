@@ -760,6 +760,7 @@ function AnnouncementsSection({
   const [loaded, setLoaded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [broadcast, setBroadcast] = useState<Announcement | null>(null);
+  const [saveErr, setSaveErr] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -780,7 +781,9 @@ function AnnouncementsSection({
   }, [artistKey]);
 
   const persist = (next: Announcement[]) => {
+    const prev = items; // snapshot for rollback
     setItems(next);
+    setSaveErr(false);
     fetch("/api/updates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -790,7 +793,14 @@ function AnnouncementsSection({
       .then((d) => {
         if (d.error) throw new Error(d.error);
       })
-      .catch((err) => console.warn("[UPDATES] save failed:", err));
+      .catch((err) => {
+        // Roll the optimistic edit back and surface it — announcements feed
+        // fanbase broadcasts, so a silently-lost save would let the team
+        // believe something is queued when it isn't (NotesSection does this).
+        console.warn("[UPDATES] save failed:", err);
+        setItems(prev);
+        setSaveErr(true);
+      });
   };
 
   const addItem = (draft: Omit<Announcement, "id" | "createdAt">) => {
@@ -813,6 +823,9 @@ function AnnouncementsSection({
         >
           {adding ? "✕ Cancel" : "＋ Add"}
         </button>
+        {saveErr && (
+          <span className="mono text-xs text-red">Save failed — retry</span>
+        )}
       </div>
       {adding && (
         <AnnouncementForm onAdd={addItem} onCancel={() => setAdding(false)} />
@@ -1058,15 +1071,24 @@ function BroadcastComposer({
     };
   }, [artistKey]);
 
-  // States present, by reachable-fan count (only those with an email).
+  // States present, by reachable-fan count. Dedupe by email per state (a Set,
+  // not a row count) so each pill matches the actual deduped BCC list — repeat
+  // buyers / case-variant duplicate addresses must not inflate the number.
   const states = useMemo(() => {
     if (!fans) return [];
-    const m = new Map<string, number>();
+    const m = new Map<string, Set<string>>();
     for (const c of fans) {
       const s = (c.state || "").trim();
-      if (s && customerEmail(c)) m.set(s, (m.get(s) ?? 0) + 1);
+      const e = customerEmail(c);
+      if (s && e) {
+        const set = m.get(s);
+        if (set) set.add(e);
+        else m.set(s, new Set([e]));
+      }
     }
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    return [...m.entries()]
+      .map(([s, set]) => [s, set.size] as [string, number])
+      .sort((a, b) => b[1] - a[1]);
   }, [fans]);
 
   // Deduped recipient emails for the chosen audience.

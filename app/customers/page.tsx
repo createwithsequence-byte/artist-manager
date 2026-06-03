@@ -10,6 +10,7 @@ import {
   type CityAggregate,
   type GeocodeMap,
 } from "@/lib/customerCrossover";
+import { uploadCustomerDataset } from "@/lib/uploadDataset";
 
 // Both viz components are client-only (three.js + Leaflet both need window).
 // Dynamic import keeps the main bundle lean — three.js is ~600KB.
@@ -70,6 +71,8 @@ export default function CustomersPage() {
   const [datasetId, setDatasetId] = useState("master");
   const [isArtistWorld, setIsArtistWorld] = useState(false);
   const [persistedAt, setPersistedAt] = useState<string | null>(null);
+  // Surfaced when the dataset fails to persist (was a silent catch).
+  const [persistError, setPersistError] = useState<string | null>(null);
   // Adopt-master offer for an empty artist world (mirror of the routing panel).
   const [masterOffer, setMasterOffer] = useState<{ count: number } | null>(
     null,
@@ -170,27 +173,24 @@ export default function CustomersPage() {
             // arrived via ?artist, else the global master) so the next visit
             // and the routing panel hydrate from the same source. Includes raw
             // rows so the routing panel doesn't re-parse the CSV.
-            fetch("/api/customers", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                id: datasetId,
-                name: datasetName,
-                aggregate,
-                customerCount: customers.length,
-                raw: customers,
-              }),
+            setPersistError(null);
+            uploadCustomerDataset({
+              id: datasetId,
+              name: datasetName,
+              aggregate,
+              customerCount: customers.length,
+              customers,
             })
-              .then((r) => r.json())
-              .then((d) => {
-                if (d?.ok) setPersistedAt(new Date().toISOString());
-              })
-              .catch((err) =>
+              .then(() => setPersistedAt(new Date().toISOString()))
+              .catch((err) => {
                 console.warn(
                   "[CUSTOMERS] persist failed:",
                   err instanceof Error ? err.message : String(err),
-                ),
-              );
+                );
+                setPersistError(
+                  err instanceof Error ? err.message : "Save failed",
+                );
+              });
           } catch (err) {
             setStage({
               kind: "error",
@@ -565,9 +565,14 @@ export default function CustomersPage() {
                   · {stage.dropped} ROWS DROPPED (un-geocoded)
                 </span>
               )}
-              {persistedAt && (
+              {persistedAt && !persistError && (
                 <span className="text-lime ml-2" title={`Saved ${persistedAt}`}>
                   ● SAVED
+                </span>
+              )}
+              {persistError && (
+                <span className="text-red ml-2" title={persistError}>
+                  ⚠ NOT SAVED — re-upload to retry
                 </span>
               )}
             </span>

@@ -252,12 +252,11 @@ export async function loadArtistOrders(
   });
   const row = result.rows[0];
   if (!row) return [];
-  try {
-    const parsed = JSON.parse(String(row.orders));
-    return Array.isArray(parsed) ? (parsed as ArtistOrder[]) : [];
-  } catch {
-    return [];
-  }
+  // A corrupt blob must NOT silently become [] — in the append path that empty
+  // array would concat onto nothing and overwrite every prior order. Throw so
+  // the caller surfaces a real error instead of destroying data.
+  const parsed = JSON.parse(String(row.orders));
+  return Array.isArray(parsed) ? (parsed as ArtistOrder[]) : [];
 }
 
 /* ── Internal per-artist notes ─────────────────────────────────────────────── */

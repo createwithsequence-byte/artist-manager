@@ -18,6 +18,7 @@ import {
 } from "@/lib/customerCrossover";
 import type { Event as ArtistEvent } from "@/lib/types";
 import type { SavedTour } from "@/lib/savedTours";
+import { uploadCustomerDataset } from "@/lib/uploadDataset";
 import {
   parseOrders,
   ordersByUser,
@@ -75,6 +76,8 @@ export function CustomerCrossoverPanel({
     null,
   );
   const [adopting, setAdopting] = useState(false);
+  // Surfaced when the customer dataset fails to persist (was a silent catch).
+  const [persistError, setPersistError] = useState<string | null>(null);
   const inputId = `crossover-csv-${artistName.replace(/\W+/g, "-")}`;
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -238,27 +241,26 @@ export function CustomerCrossoverPanel({
             admin: WORLD_CITY_ADMIN,
             country: WORLD_CITY_COUNTRY,
           });
-          fetch("/api/customers", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: primaryKey,
-              name: artistName,
-              aggregate,
-              customerCount: customers.length,
-              raw: customers,
-            }),
+          // Chunked, error-surfaced persist (no longer a single-shot that
+          // silently 413s on a large roster).
+          setPersistError(null);
+          uploadCustomerDataset({
+            id: primaryKey,
+            name: artistName,
+            aggregate,
+            customerCount: customers.length,
+            customers,
           })
-            .then((r) => r.json())
-            .then((d) => {
-              if (d?.ok) setUsingMaster(true);
-            })
-            .catch((err) =>
+            .then(() => setUsingMaster(true))
+            .catch((err) => {
               console.warn(
                 "[CROSSOVER] customer persist failed:",
                 err instanceof Error ? err.message : String(err),
-              ),
-            );
+              );
+              setPersistError(
+                err instanceof Error ? err.message : "Save failed",
+              );
+            });
         } catch (err) {
           setStage({
             kind: "error",
@@ -289,6 +291,12 @@ export function CustomerCrossoverPanel({
 
   return (
     <div>
+      {persistError && (
+        <div className="mb-3 border border-red bg-red/5 px-3 py-2 mono text-xs text-red">
+          ⚠ Couldn&apos;t save this dataset ({persistError}). Browsing works
+          this session, but it won&apos;t persist — re-upload to retry.
+        </div>
+      )}
       {stage.kind === "idle" && (
         <>
           <label
@@ -509,12 +517,16 @@ function RoutingSheet({
   // contact dataset drives routing; this lights up "who this fan is" per stop.
   const [orders, setOrders] = useState<ArtistOrder[]>([]);
   const [ordersBusy, setOrdersBusy] = useState(false);
+  // Surfaced when the song-stories upload fails partway (was a silent catch
+  // that left the stored blob truncated with no signal).
+  const [ordersErr, setOrdersErr] = useState<string | null>(null);
   const ordersInputRef = useRef<HTMLInputElement>(null);
   const ordersMap = useMemo(() => ordersByUser(orders), [orders]);
   // The stop whose dossier overlay is open (null = closed).
-  const [dossierStop, setDossierStop] = useState<
-    CustomerCrossover["perEvent"][number] | null
-  >(null);
+  // Identity ("date|city") of the open dossier's stop, NOT the perEvent object —
+  // so the modal re-derives from the live (current-radius) result every render
+  // and never shows a stale fan snapshot. Null = closed.
+  const [dossierStop, setDossierStop] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -534,6 +546,7 @@ function RoutingSheet({
   // and light up the dossier. Replace-on-upload.
   const onOrdersFile = (file: File) => {
     setOrdersBusy(true);
+    setOrdersErr(null);
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
@@ -549,7 +562,7 @@ function RoutingSheet({
         let cur: ArtistOrder[] = [];
         let bytes = 0;
         for (const o of parsed) {
-          const sz = (o.story?.length ?? 0) + 200;
+          const sz = JSON.stringify(o).length + 2;
           if (bytes + sz > 2_000_000 && cur.length) {
             chunks.push(cur);
             cur = [];
@@ -570,12 +583,18 @@ function RoutingSheet({
                 mode: i === 0 ? "replace" : "append",
               }),
             });
-            const d = await r.json();
-            if (d.error) throw new Error(d.error);
+            const d = await r.json().catch(() => ({}) as { error?: string });
+            if (!r.ok || d.error)
+              throw new Error(d.error || `Upload failed (HTTP ${r.status})`);
           }
           setOrders(parsed);
         })()
-          .catch((err) => console.warn("[ORDERS] save failed:", err))
+          .catch((err) => {
+            console.warn("[ORDERS] save failed:", err);
+            setOrdersErr(
+              err instanceof Error ? err.message : "Song-stories upload failed",
+            );
+          })
           .finally(() => setOrdersBusy(false));
       },
       error: (err) => {
@@ -731,10 +750,15 @@ function RoutingSheet({
       } as ArtistEvent,
     ]);
   };
-  const removeProvisional = (date: string, city: string) =>
+  const removeProvisional = (date: string, city: string) => {
+    // Removing a stop re-splits the route and shifts every later leg index, so
+    // a held selectedLeg would resolve to the wrong leg (map flies to it).
+    // Clear it, mirroring the guard acceptSuggestion already has on insertion.
+    setSelectedLeg(null);
     setProvisional((prev) =>
       prev.filter((p) => !(p.date === date && p.city === city)),
     );
+  };
 
   const revisedActive = provisional.length > 0;
   const buildRevised = () => {
@@ -793,6 +817,7 @@ function RoutingSheet({
     const rows: string[][] = [
       [
         "fan_name",
+        "fan_email",
         "fan_city",
         "fan_state",
         "stop_city",
@@ -806,9 +831,12 @@ function RoutingSheet({
       const stopState = pe.event.state || pe.stateCode || "";
       const stopDate = pe.event.date;
       pe.nearby.forEach((n) => {
-        n.names.forEach((name) => {
+        // Iterate the UNCAPPED fans list (name+email), not the 12-capped
+        // display names — the prior code silently dropped most of each city.
+        n.fans.forEach((f) => {
           rows.push([
-            name,
+            f.name,
+            f.email,
             n.city,
             n.stateCode,
             stopCity,
@@ -1038,6 +1066,11 @@ function RoutingSheet({
                 ? `📋 ${orders.length} stories`
                 : "＋ Song stories"}
           </button>
+          {ordersErr && (
+            <span className="mono text-xs text-red" title={ordersErr}>
+              ⚠ Upload failed — re-upload
+            </span>
+          )}
 
           {/* Jump to this artist's own Songfinch World globe — same dataset,
               spatial lens. Opens the per-artist /customers view. */}
@@ -1421,7 +1454,9 @@ function RoutingSheet({
                   radiusMiles={radiusMiles}
                   maxReach={maxReach}
                   ordersMap={ordersMap}
-                  onOpenDossier={() => setDossierStop(show)}
+                  onOpenDossier={() =>
+                    setDossierStop(`${show.event.date}|${show.event.city}`)
+                  }
                   provisional={provisionalKeys.has(
                     `${show.event.date}|${show.event.city}`,
                   )}
@@ -1492,7 +1527,7 @@ function RoutingSheet({
 
       {/* Conversational tour agent — give context, it revises the run */}
       <TourChat
-        context={buildTourContext(result, artistName, radiusMiles)}
+        context={buildTourContext(result, artistName, dRadius)}
         onApplyStops={applyAgentStops}
         onApplyAsNew={applyAgentStopsAsNew}
       />
@@ -1503,14 +1538,23 @@ function RoutingSheet({
         plotted.
       </div>
 
-      {dossierStop && (
-        <DossierModal
-          show={dossierStop}
-          ordersMap={ordersMap}
-          artistName={artistName}
-          onClose={() => setDossierStop(null)}
-        />
-      )}
+      {(() => {
+        // Re-find the stop in the LIVE result each render so the dossier tracks
+        // the current radius; if it's gone (stop removed), the modal closes.
+        const dShow = dossierStop
+          ? result.perEvent.find(
+              (pe) => `${pe.event.date}|${pe.event.city}` === dossierStop,
+            )
+          : null;
+        return dShow ? (
+          <DossierModal
+            show={dShow}
+            ordersMap={ordersMap}
+            artistName={artistName}
+            onClose={() => setDossierStop(null)}
+          />
+        ) : null;
+      })()}
     </div>
   );
 }

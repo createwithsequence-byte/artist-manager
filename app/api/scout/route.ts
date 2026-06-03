@@ -251,9 +251,6 @@ async function processArtist(
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const ninetyDaysHence = new Date(
-      today.getTime() + 90 * 24 * 60 * 60 * 1000,
-    );
     const hasUpcomingEvent = mergedEvents.some((e) => {
       if (!e.date) return false;
       const d = new Date(e.date);
@@ -262,7 +259,10 @@ async function processArtist(
     const hasRecentRelease = releases.some((r) => {
       if (!r.date) return false;
       const d = new Date(r.date);
-      return !isNaN(d.getTime()) && d >= thirtyDaysAgo && d <= ninetyDaysHence;
+      // "Recent" = within the last 30 days only. A release dated in the future
+      // (announced rollout) is NOT a recent release and must not strip the
+      // LLM's quiet/between-cycles judgment.
+      return !isNaN(d.getTime()) && d >= thirtyDaysAgo && d <= today;
     });
     if (hasUpcomingEvent) {
       llmSignals.add("active-touring");

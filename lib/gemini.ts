@@ -403,7 +403,12 @@ export async function generateWithRetry(
   // Skip models we've already learned are exhausted — either from this
   // lambda's prior calls OR from peer lambdas via the shared Turso cooldown
   // table. Big speedup on batches (resynth, scout) processing many artists.
-  const modelsToTry = fullChain.filter((m) => !isModelExhausted(m));
+  // With NO Gemini key configured, skip the chain entirely: calling the client
+  // would throw a non-transient auth error that rethrows before the Groq/
+  // Cerebras fallbacks below ever run. Empty chain → falls straight through.
+  const modelsToTry = process.env.GEMINI_API_KEY
+    ? fullChain.filter((m) => !isModelExhausted(m))
+    : [];
   let lastErr: unknown = null;
 
   if (modelsToTry.length === 0) {
