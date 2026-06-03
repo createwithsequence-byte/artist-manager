@@ -566,7 +566,10 @@ export default function CustomersPage() {
                 </span>
               )}
               {persistedAt && !persistError && (
-                <span className="text-lime ml-2" title={`Saved ${persistedAt}`}>
+                <span
+                  className="text-lime-ink ml-2"
+                  title={`Saved ${persistedAt}`}
+                >
                   ● SAVED
                 </span>
               )}

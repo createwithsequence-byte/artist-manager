@@ -154,7 +154,7 @@ export function ExportSection({ reports, totalArtists }: Props) {
             </span>
           )}
           {diveSlackState.kind === "posted" && (
-            <span className="mono text-lime">
+            <span className="mono text-lime-ink">
               ✓ DIVE PREP POSTED · {diveSlackState.count} ARTISTS ·{" "}
               {diveSlackState.at}
             </span>

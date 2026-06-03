@@ -729,7 +729,7 @@ function NotesSection({ artistKey }: { artistKey: string }) {
             status === "error"
               ? "text-red"
               : status === "saved"
-                ? "text-lime"
+                ? "text-lime-ink"
                 : "text-ink/40"
           }`}
         >
