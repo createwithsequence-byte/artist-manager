@@ -7,6 +7,9 @@ import Papa from "papaparse";
 import {
   aggregateByCity,
   parseCustomers,
+  parseImportedFans,
+  mergeFanSources,
+  type Customer,
   type CityAggregate,
   type GeocodeMap,
 } from "@/lib/customerCrossover";
@@ -73,12 +76,18 @@ export default function CustomersPage() {
   const [persistedAt, setPersistedAt] = useState<string | null>(null);
   // Surfaced when the dataset fails to persist (was a silent catch).
   const [persistError, setPersistError] = useState<string | null>(null);
+  // Songfinch vs imported breakdown of the loaded fanbase, for the header.
+  const [fanSplit, setFanSplit] = useState<{
+    songfinch: number;
+    imported: number;
+  } | null>(null);
   // Adopt-master offer for an empty artist world (mirror of the routing panel).
   const [masterOffer, setMasterOffer] = useState<{ count: number } | null>(
     null,
   );
   const [adopting, setAdopting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const importInput = useRef<HTMLInputElement>(null);
 
   // On mount: read ?artist + ?name from the URL (window.location avoids the
   // useSearchParams Suspense-boundary requirement), then hydrate THAT dataset.
@@ -132,15 +141,53 @@ export default function CustomersPage() {
       );
   }, []);
 
-  const handleFile = useCallback(
-    (file: File) => {
+  // Source-aware ingest. A Songfinch CSV and the artist's imported mailing list
+  // both land in ONE per-artist dataset: each upload replaces only its own
+  // source's rows (mergeFanSources) and dedupes by email across sources, so
+  // re-uploading one never wipes the other. The merged set drives the globe +
+  // routing + outreach exactly as before.
+  const ingestFans = useCallback(
+    (file: File, source: "songfinch" | "imported") => {
       setStage({ kind: "parsing", fileName: file.name });
       Papa.parse<Record<string, string>>(file, {
         header: true,
         skipEmptyLines: true,
         complete: async (result) => {
           try {
-            const customers = parseCustomers(result.data);
+            const parsed =
+              source === "imported"
+                ? parseImportedFans(result.data)
+                : parseCustomers(result.data);
+            if (parsed.length === 0) {
+              setStage({
+                kind: "error",
+                message:
+                  source === "imported"
+                    ? "No emails found — the mailing-list CSV needs an email column."
+                    : "No customers found. Check the CSV has name/city/state columns.",
+              });
+              return;
+            }
+
+            // Merge with whatever's already stored for this dataset.
+            let existing: Customer[] = [];
+            try {
+              const d = await fetch(
+                `/api/customers?id=${encodeURIComponent(datasetId)}&raw=1`,
+              ).then((r) => r.json());
+              if (Array.isArray(d?.raw)) existing = d.raw as Customer[];
+            } catch {
+              // No existing dataset (or fetch failed) — start from empty.
+            }
+            const merged = mergeFanSources(existing, parsed, source);
+            const sfCount = merged.filter(
+              (c) => (c.source ?? "songfinch") === "songfinch",
+            ).length;
+            setFanSplit({
+              songfinch: sfCount,
+              imported: merged.length - sfCount,
+            });
+
             const [
               { US_CITY_LATLNG },
               { WORLD_CITY_ADMIN, WORLD_CITY_COUNTRY },
@@ -149,7 +196,7 @@ export default function CustomersPage() {
               import("@/lib/worldCityToLatLng"),
             ]);
             const { aggregate, dropped } = aggregateByCity(
-              customers,
+              merged,
               US_CITY_LATLNG as unknown as GeocodeMap,
               { admin: WORLD_CITY_ADMIN, country: WORLD_CITY_COUNTRY },
             );
@@ -157,29 +204,25 @@ export default function CustomersPage() {
               setStage({
                 kind: "error",
                 message:
-                  "No geocoded cities found. Check that the CSV has city + state columns.",
+                  "No geocoded cities found. Check the CSV has city + state columns.",
               });
               return;
             }
             setStage({
               kind: "ready",
               aggregate,
-              customerCount: customers.length,
+              customerCount: merged.length,
               dropped,
               sourceLabel: file.name,
             });
 
-            // Auto-persist to Turso keyed to THIS dataset (per-artist when we
-            // arrived via ?artist, else the global master) so the next visit
-            // and the routing panel hydrate from the same source. Includes raw
-            // rows so the routing panel doesn't re-parse the CSV.
             setPersistError(null);
             uploadCustomerDataset({
               id: datasetId,
               name: datasetName,
               aggregate,
-              customerCount: customers.length,
-              customers,
+              customerCount: merged.length,
+              customers: merged,
             })
               .then(() => setPersistedAt(new Date().toISOString()))
               .catch((err) => {
@@ -203,6 +246,15 @@ export default function CustomersPage() {
       });
     },
     [datasetName, datasetId],
+  );
+
+  const handleFile = useCallback(
+    (file: File) => ingestFans(file, "songfinch"),
+    [ingestFans],
+  );
+  const importFans = useCallback(
+    (file: File) => ingestFans(file, "imported"),
+    [ingestFans],
   );
 
   const onDrop = (e: React.DragEvent) => {
@@ -306,6 +358,13 @@ export default function CustomersPage() {
               <span className="font-bold">
                 {headerStats.total.toLocaleString()}
               </span>
+              {fanSplit && fanSplit.imported > 0 && (
+                <span className="text-ink/40">
+                  {" "}
+                  ({fanSplit.songfinch.toLocaleString()} SF +{" "}
+                  {fanSplit.imported.toLocaleString()} list)
+                </span>
+              )}
             </span>
             <span>
               <span className="text-ink/45">CITIES</span>{" "}
@@ -318,12 +377,30 @@ export default function CustomersPage() {
               <span className="font-bold">{headerStats.states}</span>
             </span>
             <button
+              onClick={() => importInput.current?.click()}
+              className="px-2 h-7 border border-blue/40 text-blue hover:bg-blue hover:text-cream transition-colors"
+              title="Import the artist's own mailing list (CSV with an email column) — merges with the Songfinch fans, deduped by email"
+            >
+              ＋ IMPORT FANBASE
+            </button>
+            <button
               onClick={replaceDataset}
               className="px-2 h-7 border border-ink/30 hover:bg-ink hover:text-cream transition-colors"
-              title="Upload a different CSV to replace the master"
+              title="Upload a different Songfinch CSV (replaces only the Songfinch fans; your imported list stays)"
             >
               ↑ REPLACE
             </button>
+            <input
+              ref={importInput}
+              type="file"
+              accept=".csv,text/csv,application/vnd.ms-excel,application/csv"
+              className="sr-only"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) importFans(f);
+                e.target.value = "";
+              }}
+            />
           </div>
         )}
       </header>

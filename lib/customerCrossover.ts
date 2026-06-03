@@ -78,6 +78,11 @@ export type Customer = {
   songCount?: number;
   // raw row preserved for future enrichment (geocoding etc.)
   raw?: Record<string, string>;
+  /** Where this fan came from. Absent = "songfinch" (legacy rows predate the
+   *  field). "imported" = the artist's own mailing list. Lets the two sources
+   *  coexist in one dataset, each replaceable without clobbering the other,
+   *  and segmentable for outreach. */
+  source?: "songfinch" | "imported";
 };
 
 /** A suggested net-new tour stop that sits roughly on-route between two
@@ -793,6 +798,7 @@ function extractCustomer(row: Record<string, string>): Customer {
       return Number.isFinite(n) ? n : undefined;
     })(),
     raw: row,
+    source: "songfinch",
   };
 }
 
@@ -833,6 +839,89 @@ export function customerUserId(c: Customer): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Parse the artist's OWN mailing-list CSV into Customer[] tagged
+ * source:"imported". Email is REQUIRED (the point of importing a list is the
+ * addresses); name/city/state are best-effort so imported fans still map +
+ * route when they carry a location. Tolerant of arbitrary headers.
+ */
+export function parseImportedFans(rows: Record<string, string>[]): Customer[] {
+  const out: Customer[] = [];
+  for (const row of rows) {
+    const get = (...keys: string[]): string | undefined => {
+      for (const k of keys) {
+        const mk = Object.keys(row).find(
+          (rk) => rk.toLowerCase().trim() === k.toLowerCase(),
+        );
+        const v = mk ? (row[mk] ?? "").trim() : "";
+        if (v) return v;
+      }
+      return undefined;
+    };
+    // Email — required. Prefer an email-named column, else the first value that
+    // looks like an address.
+    let email = get("email", "email_address", "e-mail", "mail");
+    if (!email || !EMAIL_RE.test(email)) {
+      email = undefined;
+      for (const k of Object.keys(row)) {
+        const v = (row[k] ?? "").trim();
+        if (EMAIL_RE.test(v)) {
+          email = v;
+          break;
+        }
+      }
+    }
+    if (!email) continue; // an imported fan with no email is unusable
+    out.push({
+      name: get("name", "full_name", "first_name", "customer_name"),
+      city: get("city", "city_name", "town"),
+      state: get("state", "state_name", "region", "province"),
+      raw: row,
+      source: "imported",
+    });
+  }
+  return out;
+}
+
+/**
+ * Combine an artist's two fan sources into one deduped list. `incoming` (tagged
+ * `source`) REPLACES the existing rows of that same source, leaving the other
+ * source untouched — so re-uploading Songfinch data never wipes the artist's
+ * imported list, and vice-versa. On a cross-source email collision the Songfinch
+ * record always wins (it's richer — it carries the song), regardless of which
+ * side was uploaded.
+ */
+export function mergeFanSources(
+  existing: Customer[],
+  incoming: Customer[],
+  source: "songfinch" | "imported",
+): Customer[] {
+  const kept = existing.filter((c) => (c.source ?? "songfinch") !== source);
+  const union: Customer[] = [
+    ...kept,
+    ...incoming.map((c) => ({ ...c, source })),
+  ];
+  const byEmail = new Map<string, Customer>();
+  const noEmail: Customer[] = [];
+  for (const c of union) {
+    const e = customerEmail(c);
+    if (!e) {
+      noEmail.push(c);
+      continue;
+    }
+    const prev = byEmail.get(e);
+    if (!prev) {
+      byEmail.set(e, c);
+      continue;
+    }
+    // Conflict: upgrade to the Songfinch record if the current one is it.
+    const prevSf = (prev.source ?? "songfinch") === "songfinch";
+    const curSf = (c.source ?? "songfinch") === "songfinch";
+    if (!prevSf && curSf) byEmail.set(e, c);
+  }
+  return [...byEmail.values(), ...noEmail];
 }
 
 /** Parse a raw CSV row list into normalized Customer objects. */
