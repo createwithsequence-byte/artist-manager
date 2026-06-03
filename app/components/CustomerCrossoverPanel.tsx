@@ -2237,6 +2237,18 @@ function DossierSong({ order }: { order: ArtistOrder }) {
             {"☆".repeat(5 - order.rating)}
           </span>
         )}
+        {order.songUrl && (
+          <a
+            href={order.songUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="dossier-listen"
+            title="Hear this song on Songfinch before the show"
+            onClick={(e) => e.stopPropagation()}
+          >
+            ♪ Listen ↗
+          </a>
+        )}
       </div>
       {story && (
         <div className="dossier-story">

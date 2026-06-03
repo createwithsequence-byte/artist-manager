@@ -98,6 +98,7 @@ export async function POST(req: NextRequest) {
             ? o.rating
             : null,
         orderDate: String(o.orderDate ?? ""),
+        ...(o.songUrl ? { songUrl: String(o.songUrl) } : {}),
         ...(o.audioId ? { audioId: String(o.audioId) } : {}),
       }));
     const toStore =

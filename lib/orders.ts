@@ -22,9 +22,12 @@ export type ArtistOrder = {
   /** 1–5, or null when unrated (only ~29% are rated). */
   rating: number | null;
   orderDate: string;
-  /** Cloudinary storage path from audio_data_raw.id. NOT yet a playable URL
-   *  (legacy paths 404 on the public CDN) — kept so audio can light up once a
-   *  delivery/signing scheme is known, without re-uploading. */
+  /** Public Songfinch song page ("…/songs/<uuid>") — the reliable "hear it"
+   *  link surfaced in the dossier. Present in exports that include links. */
+  songUrl?: string;
+  /** Cloudinary storage path from audio_data_raw.id. NOT a playable URL on its
+   *  own (legacy paths 404 on the public CDN); kept for a future inline-audio
+   *  scheme. Prefer songUrl for "listen". */
   audioId?: string;
 };
 
@@ -70,6 +73,9 @@ export function parseOrders(rows: Record<string, string>[]): ArtistOrder[] {
         ? ratingRaw
         : null;
 
+    const songUrlRaw = get("song_page_url", "song_url", "song_link");
+    const songUrl = /^https?:\/\//i.test(songUrlRaw) ? songUrlRaw : undefined;
+
     out.push({
       userId,
       customerName: get("customer_name", "name", "full_name"),
@@ -81,6 +87,7 @@ export function parseOrders(rows: Record<string, string>[]): ArtistOrder[] {
       genre: get("genre", "style"),
       rating,
       orderDate: get("order_date", "delivery_date", "date"),
+      songUrl,
       audioId,
     });
   }

@@ -1366,6 +1366,17 @@ body {
   color: var(--rs-red);
   letter-spacing: 1px;
 }
+.dossier-listen {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--rs-blue);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.dossier-listen:hover {
+  text-decoration: underline;
+}
 .dossier-story {
   font-size: 13px;
   line-height: 1.5;
