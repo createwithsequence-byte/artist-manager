@@ -1107,12 +1107,26 @@ function BroadcastComposer({
   const batches = Math.max(1, Math.ceil(emails.length / GMAIL_CAP));
   const su = encodeURIComponent(subject);
   const bd = encodeURIComponent(body);
-  const openGmail = (slice: string[]) =>
+  const openGmail = (slice: string[]) => {
     window.open(
       `https://mail.google.com/mail/?view=cm&fs=1&bcc=${encodeURIComponent(slice.join(","))}&su=${su}&body=${bd}`,
       "_blank",
       "noopener,noreferrer",
     );
+    // Log the broadcast so the outreach ledger remembers it (feeds the
+    // dashboard's "last reached out" + recurrence guards).
+    fetch("/api/outreach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        artist: artistKey,
+        channel: "broadcast",
+        target: announcement.headline,
+        recipientCount: slice.length,
+        note: ANNOUNCEMENT_LABEL[announcement.type],
+      }),
+    }).catch((err) => console.warn("[OUTREACH] broadcast log failed:", err));
+  };
   const copyEmails = () =>
     navigator.clipboard
       ?.writeText(emails.join(", "))

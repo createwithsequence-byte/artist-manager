@@ -906,6 +906,14 @@ body {
   text-transform: none;
   color: var(--rs-blue);
 }
+/* "already reached out" chip — lime-ink (AA on cream) as a done signal. */
+.rsheet .rs-contacted {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--rs-lime-ink);
+}
 .rsheet .rs-fillrow {
   display: flex;
   align-items: center;

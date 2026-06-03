@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { ensureSchema, getDb } from "./db";
 import type { CityAggregate, Customer } from "./customerCrossover";
 import type { ArtistOrder } from "./orders";
 import type { Announcement } from "./updates";
+import type { OutreachChannel, OutreachEntry } from "./outreach";
 
 /**
  * SF customer master persistence — stores pre-aggregated city roll-ups so the
@@ -327,4 +329,58 @@ export async function saveUpdates(
             updated_at = excluded.updated_at`,
     args: [artistKey, JSON.stringify(updates), now],
   });
+}
+
+/* ── Outreach ledger ───────────────────────────────────────────────────────── */
+
+export async function logOutreach(entry: {
+  artistKey: string;
+  channel: OutreachChannel;
+  target: string;
+  recipientCount: number;
+  note?: string;
+}): Promise<void> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) return;
+  const now = new Date().toISOString();
+  await db.execute({
+    sql: `INSERT INTO outreach_log
+            (id, artist_key, channel, target, recipient_count, note, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      randomUUID(),
+      entry.artistKey,
+      entry.channel,
+      entry.target,
+      entry.recipientCount,
+      entry.note ?? null,
+      now,
+    ],
+  });
+}
+
+export async function loadOutreach(
+  artistKey: string,
+): Promise<OutreachEntry[]> {
+  await ensureSchema();
+  const db = getDb();
+  if (!db) return [];
+  const result = await db.execute({
+    sql: `SELECT id, artist_key, channel, target, recipient_count, note, created_at
+            FROM outreach_log
+           WHERE artist_key = ?
+           ORDER BY created_at DESC
+           LIMIT 2000`,
+    args: [artistKey],
+  });
+  return result.rows.map((r) => ({
+    id: String(r.id),
+    artistKey: String(r.artist_key),
+    channel: r.channel === "broadcast" ? "broadcast" : "email-stop",
+    target: String(r.target),
+    recipientCount: Number(r.recipient_count) || 0,
+    note: r.note != null ? String(r.note) : undefined,
+    createdAt: String(r.created_at),
+  }));
 }

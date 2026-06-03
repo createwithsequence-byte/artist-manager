@@ -125,6 +125,24 @@ export async function ensureSchema(): Promise<void> {
     updates TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`);
+  // Outreach ledger — one row per fan-contact action (a per-stop email or a
+  // fanbase/segment broadcast). Gives the tool memory of who's been reached,
+  // so the team stops double-sending and so the dashboard / recurring-occasion
+  // radar / RSVP can all read a single "last contacted" source. target is the
+  // stop identity (date|city) or the announcement, so the panel can match it
+  // back to a row in O(1).
+  await db.execute(`CREATE TABLE IF NOT EXISTS outreach_log (
+    id TEXT PRIMARY KEY,
+    artist_key TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    target TEXT NOT NULL,
+    recipient_count INTEGER NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL
+  )`);
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_outreach_artist ON outreach_log(artist_key)`,
+  );
   _schemaReady = true;
 }
 

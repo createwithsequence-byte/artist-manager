@@ -20,6 +20,11 @@ import type { Event as ArtistEvent } from "@/lib/types";
 import type { SavedTour } from "@/lib/savedTours";
 import { uploadCustomerDataset } from "@/lib/uploadDataset";
 import {
+  daysAgoLabel,
+  lastContactByTarget,
+  type OutreachEntry,
+} from "@/lib/outreach";
+import {
   parseOrders,
   ordersByUser,
   firstName,
@@ -527,6 +532,47 @@ function RoutingSheet({
   // so the modal re-derives from the live (current-radius) result every render
   // and never shows a stale fan snapshot. Null = closed.
   const [dossierStop, setDossierStop] = useState<string | null>(null);
+
+  // Outreach ledger — every per-stop email logs a row, so each stop can show
+  // "already reached out · Nd ago" and the team stops double-sending.
+  const [outreach, setOutreach] = useState<OutreachEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/outreach?artist=${encodeURIComponent(customerKey)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && Array.isArray(d.entries)) setOutreach(d.entries);
+      })
+      .catch((err) => console.warn("[OUTREACH] hydrate failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [customerKey]);
+  const lastContact = useMemo(() => lastContactByTarget(outreach), [outreach]);
+  const logStopEmail = (target: string, count: number) => {
+    // Optimistic — show the chip instantly, then persist (fire-and-forget).
+    setOutreach((prev) => [
+      {
+        id: `local-${target}-${prev.length}`,
+        artistKey: customerKey,
+        channel: "email-stop",
+        target,
+        recipientCount: count,
+        createdAt: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
+    fetch("/api/outreach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        artist: customerKey,
+        channel: "email-stop",
+        target,
+        recipientCount: count,
+      }),
+    }).catch((err) => console.warn("[OUTREACH] log failed:", err));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1454,6 +1500,8 @@ function RoutingSheet({
                   radiusMiles={radiusMiles}
                   maxReach={maxReach}
                   ordersMap={ordersMap}
+                  lastContact={lastContact}
+                  onLogEmail={logStopEmail}
                   onOpenDossier={() =>
                     setDossierStop(`${show.event.date}|${show.event.city}`)
                   }
@@ -1644,6 +1692,8 @@ function ShowRow({
   provisional,
   selected,
   ordersMap,
+  lastContact,
+  onLogEmail,
   onOpenDossier,
   onRemove,
   onSelect,
@@ -1656,6 +1706,8 @@ function ShowRow({
   provisional: boolean;
   selected: boolean;
   ordersMap: Map<string, ArtistOrder[]>;
+  lastContact: Map<string, string>;
+  onLogEmail: (target: string, count: number) => void;
   onOpenDossier: () => void;
   onRemove?: () => void;
   onSelect: () => void;
@@ -1712,6 +1764,9 @@ function ShowRow({
       );
       setEmailNote(`✓ ${emails.length} emails copied · paste into BCC`);
     }
+    // Record the reach-out so this stop shows "already contacted" and the team
+    // doesn't double-send. Keyed to the same stop identity the dossier uses.
+    onLogEmail(`${show.event.date}|${show.event.city}`, emails.length);
   };
   useEffect(() => {
     if (!emailNote) return;
@@ -1830,6 +1885,19 @@ function ShowRow({
               </button>
             )}
             {emailNote && <span className="rs-emailnote">{emailNote}</span>}
+            {(() => {
+              const ts = lastContact.get(
+                `${show.event.date}|${show.event.city}`,
+              );
+              return ts ? (
+                <span
+                  className="rs-contacted"
+                  title={`Last reached out ${new Date(ts).toLocaleString()}`}
+                >
+                  ✓ reached out · {daysAgoLabel(ts, Date.now())}
+                </span>
+              ) : null;
+            })()}
           </div>
           {inCity && <WhoRow group={inCity} accent />}
           {secondary.map((g, i) => (
