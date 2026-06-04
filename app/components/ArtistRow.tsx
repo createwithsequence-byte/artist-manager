@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { ArtistReport, Signal } from "@/lib/types";
+import type { ArtistReport, Signal, SpotifyTopCity } from "@/lib/types";
 import { customerKeys } from "@/lib/identity";
 import { customerEmail, type Customer } from "@/lib/customerCrossover";
 import { firstName, type OrderSummary } from "@/lib/orders";
@@ -264,6 +264,7 @@ export function ArtistRow({
           <IdentityMirror
             artistKey={customerKeys(report)[0]}
             artistName={report.name}
+            spotifyCities={report.spotify?.topCities}
           />
 
           <NotesSection artistKey={customerKeys(report)[0]} />
@@ -455,9 +456,11 @@ export function ArtistRow({
 function IdentityMirror({
   artistKey,
   artistName,
+  spotifyCities,
 }: {
   artistKey: string;
   artistName: string;
+  spotifyCities?: SpotifyTopCity[];
 }) {
   const [summary, setSummary] = useState<OrderSummary | null>(null);
   const [topStates, setTopStates] = useState<
@@ -552,6 +555,13 @@ function IdentityMirror({
 
   const occMax = summary.byOccasion[0]?.count || 1;
   const line = characterizePortrait(summary);
+  const stream = streamSplit(spotifyCities);
+  const repeatPct =
+    summary.uniqueFans > 0
+      ? Math.round((summary.patronCount / summary.uniqueFans) * 100)
+      : 0;
+  const peakMonths = topCalendarMonths(summary.byCalendarMonth);
+  const mom = summary.momentum;
 
   return (
     <div className="md:col-span-2 pt-3 border-t border-ink/10">
@@ -611,6 +621,31 @@ function IdentityMirror({
           </div>
         </div>
       </div>
+      {/* Momentum: are they heating up or cooling down? Sparkline + trailing-
+          quarter trend + how recently the last song landed. */}
+      {(summary.monthly.length >= 2 || summary.lastOrderAt) && (
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-2 mb-4">
+          {summary.monthly.length >= 2 && (
+            <MomentumSpark monthly={summary.monthly} />
+          )}
+          <div className="mono text-xs text-ink/55 pb-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {mom && mom.pct != null && (
+              <span
+                className={mom.pct >= 0 ? "text-ink font-bold" : "text-ink/55"}
+              >
+                {mom.pct >= 0 ? "▲" : "▼"} {Math.abs(Math.round(mom.pct * 100))}
+                % VS PRIOR QUARTER
+              </span>
+            )}
+            {summary.lastOrderAt && (
+              <span>
+                LAST SONG{" "}
+                {daysAgoLabel(summary.lastOrderAt, Date.now()).toUpperCase()}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
       {line && (
         <div className="serif-italic text-ink/80 mb-4 max-w-2xl">{line}</div>
       )}
@@ -644,6 +679,11 @@ function IdentityMirror({
               );
             })}
           </div>
+          {peakMonths.length > 0 && (
+            <div className="mono text-ink/45 text-xs mt-3">
+              BUSIEST · {peakMonths.join(" · ")}
+            </div>
+          )}
         </div>
 
         <div className="space-y-4">
@@ -666,7 +706,7 @@ function IdentityMirror({
           {summary.patronCount > 0 && (
             <div>
               <div className="mono text-ink/45 mb-2 text-xs">
-                PATRONS · CAME BACK
+                PATRONS · {repeatPct}% CAME BACK
               </div>
               <div className="text-sm">
                 <span className="font-medium">{summary.patronCount}</span>{" "}
@@ -709,8 +749,152 @@ function IdentityMirror({
           )}
         </div>
       </div>
+
+      {/* Streams vs buyers — the fusion only this tool can show: where the
+          audience listens vs where the paying fans actually are. */}
+      {stream && topStates.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-ink/10">
+          <div className="mono text-ink/45 mb-2 text-xs">
+            ✦ STREAMS VS BUYERS
+          </div>
+          <div className="grid sm:grid-cols-2 gap-x-10 gap-y-1.5 text-sm">
+            <div>
+              <span className="mono text-ink/45 text-xs">STREAMS → </span>
+              <span className="font-medium text-blue">
+                {stream.share != null
+                  ? `${Math.round(stream.share * 100)}% `
+                  : ""}
+                {stream.topCountry}
+              </span>
+              {stream.topCities.length > 0 && (
+                <span className="text-ink/60">
+                  {" "}
+                  · {stream.topCities.join(", ")}
+                </span>
+              )}
+            </div>
+            <div>
+              <span className="mono text-ink/45 text-xs">BUYERS → </span>
+              <span className="font-medium text-red">
+                {topStates
+                  .slice(0, 3)
+                  .map((s) => s.state)
+                  .join(", ")}
+              </span>
+            </div>
+          </div>
+          <div className="serif-italic text-ink/80 mt-2 max-w-2xl">
+            {US_NAMES.test(stream.topCountry)
+              ? "Streams and song-buyers both center on the US — audience and customers are aligned."
+              : `Their audience streams from ${stream.topCountry}, but their song-buyers cluster in ${topStates
+                  .slice(0, 3)
+                  .map((s) => s.state)
+                  .join(
+                    ", ",
+                  )} — the love and the dollars live in different places. The untapped play is reaching the people already streaming.`}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+const MONTH_ABBR = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+// A 12-month bar strip from a sparse monthly series — the artist's volume
+// shape at a glance. Trailing window ends at the latest month with data, so a
+// cooling artist literally trails off to the right.
+function MomentumSpark({
+  monthly,
+}: {
+  monthly: { ym: string; count: number }[];
+}) {
+  if (monthly.length < 2) return null;
+  const toIdx = (ym: string) => {
+    const [y, m] = ym.split("-").map(Number);
+    return y * 12 + (m - 1);
+  };
+  const counts = new Map(monthly.map((p) => [toIdx(p.ym), p.count]));
+  const maxIdx = Math.max(...counts.keys());
+  const SPAN = 12;
+  const bars: { idx: number; count: number }[] = [];
+  for (let i = maxIdx - SPAN + 1; i <= maxIdx; i++)
+    bars.push({ idx: i, count: counts.get(i) ?? 0 });
+  const peak = Math.max(1, ...bars.map((b) => b.count));
+  return (
+    <div
+      className="flex items-end gap-[3px] h-10"
+      aria-label={`Songs per month, last ${SPAN} months`}
+    >
+      {bars.map((b) => (
+        <span
+          key={b.idx}
+          className={`w-1.5 ${b.count > 0 ? "bg-red/80" : "bg-ink/12"}`}
+          style={{
+            height: `${b.count > 0 ? Math.max(10, Math.round((b.count / peak) * 100)) : 8}%`,
+          }}
+          title={`${MONTH_ABBR[((b.idx % 12) + 12) % 12]}: ${b.count}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Top calendar months by all-time volume → the artist's busy season.
+function topCalendarMonths(byMonth: number[]): string[] {
+  const tot = byMonth.reduce((a, b) => a + b, 0);
+  if (!tot) return [];
+  return byMonth
+    .map((count, i) => ({ count, i }))
+    .filter((m) => m.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3)
+    .map((m) => MONTH_ABBR[m.i].toUpperCase());
+}
+
+const US_NAMES = /^(us|usa|u\.s\.?|united states)$/i;
+
+// Roll Spotify top-cities up to a dominant country (+ share) and the loudest
+// cities. Weights by listeners when present, else by city count. The half of
+// the "streams vs buyers" insight that comes from streaming data.
+function streamSplit(
+  cities?: SpotifyTopCity[],
+): { topCountry: string; share: number | null; topCities: string[] } | null {
+  if (!cities || cities.length === 0) return null;
+  const useListeners = cities.some((c) => (c.listeners ?? 0) > 0);
+  const byCountry = new Map<string, number>();
+  let total = 0;
+  for (const c of cities) {
+    const w = useListeners ? (c.listeners ?? 0) : 1;
+    total += w;
+    const country = (c.country || "").trim() || "—";
+    byCountry.set(country, (byCountry.get(country) ?? 0) + w);
+  }
+  const top = [...byCountry.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (!top) return null;
+  const topCities = [...cities]
+    .sort((a, b) => (b.listeners ?? 0) - (a.listeners ?? 0))
+    .slice(0, 3)
+    .map((c) => c.city)
+    .filter(Boolean);
+  return {
+    topCountry: top[0],
+    share: total > 0 ? top[1] / total : null,
+    topCities,
+  };
 }
 
 // A short, data-true characterization of the catalog. Names the dominant

@@ -123,7 +123,45 @@ export type OrderSummary = {
   patronCount: number; // fans with 2+ songs
   topPatrons: { name: string; count: number }[]; // desc, capped
   ratedAvg: number | null; // mean rating where rated
+  /** Songs per calendar month, ascending by "YYYY-MM". Sparse — only months
+   *  that have orders. Drives the momentum sparkline. */
+  monthly: { ym: string; count: number }[];
+  /** Most recent order date as "YYYY-MM-DD", or null when none parse. Drives
+   *  the "last song N days ago" pulse. */
+  lastOrderAt: string | null;
+  /** Trailing-quarter momentum, anchored on the artist's OWN latest order month
+   *  (honest even when the export is months stale). recent = last 3 months,
+   *  prior = the 3 before that. pct null when there's no prior quarter. null
+   *  entirely when fewer than 2 distinct months of data. */
+  momentum: { recent: number; prior: number; pct: number | null } | null;
+  /** Songs by calendar month, index 0 = January … 11 = December (summed across
+   *  all years). Drives the "busy season" read. */
+  byCalendarMonth: number[];
 };
+
+/**
+ * Tolerant order-date parse → { y, m (1-based), d }. Handles ISO
+ * ("YYYY-MM-DD…"), US ("M/D/YYYY"), and anything else `Date` understands
+ * (read in UTC to avoid month-boundary drift). Returns null when unparseable.
+ */
+export function parseOrderDate(
+  s: string,
+): { y: number; m: number; d: number } | null {
+  const t = (s || "").trim();
+  if (!t) return null;
+  let mm = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (mm) return { y: +mm[1], m: +mm[2], d: +mm[3] };
+  mm = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (mm) return { y: +mm[3], m: +mm[1], d: +mm[2] };
+  const dt = new Date(t);
+  if (!Number.isNaN(dt.getTime()))
+    return {
+      y: dt.getUTCFullYear(),
+      m: dt.getUTCMonth() + 1,
+      d: dt.getUTCDate(),
+    };
+  return null;
+}
 
 /**
  * Roll an artist's orders into a portrait of their work: what occasions they
@@ -136,6 +174,12 @@ export function summarizeOrders(orders: ArtistOrder[]): OrderSummary {
   const byUser = new Map<string, { name: string; count: number }>();
   let ratingSum = 0;
   let ratingN = 0;
+  // Time series: orders keyed by month-index (y*12 + m-1) for cheap arithmetic,
+  // plus calendar-month tallies and a running max date for the pulse.
+  const byMonthIdx = new Map<number, number>();
+  const calMonth = new Array(12).fill(0) as number[];
+  let maxKey = -1; // y*10000 + m*100 + d — for the latest order
+  let lastOrderAt: string | null = null;
   for (const o of orders) {
     const oc = (o.occasion || "").trim() || "Unspecified";
     occ.set(oc, (occ.get(oc) ?? 0) + 1);
@@ -148,12 +192,54 @@ export function summarizeOrders(orders: ArtistOrder[]): OrderSummary {
       ratingSum += o.rating;
       ratingN += 1;
     }
+    const d = parseOrderDate(o.orderDate);
+    if (d) {
+      const idx = d.y * 12 + (d.m - 1);
+      byMonthIdx.set(idx, (byMonthIdx.get(idx) ?? 0) + 1);
+      calMonth[d.m - 1] += 1;
+      const key = d.y * 10000 + d.m * 100 + d.d;
+      if (key > maxKey) {
+        maxKey = key;
+        lastOrderAt = `${d.y}-${String(d.m).padStart(2, "0")}-${String(
+          d.d,
+        ).padStart(2, "0")}`;
+      }
+    }
   }
   const desc = (m: Map<string, number>) =>
     [...m.entries()].sort((a, b) => b[1] - a[1]);
   const patrons = [...byUser.values()]
     .filter((u) => u.count >= 2)
     .sort((a, b) => b.count - a.count);
+
+  // Monthly series (sparse, ascending) for the sparkline.
+  const monthly = [...byMonthIdx.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([idx, count]) => ({
+      ym: `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}`,
+      count,
+    }));
+
+  // Momentum: anchor on the latest month that has data, sum the trailing 3
+  // months vs the 3 before. Stale exports stay honest — we measure the slope at
+  // the END of their data, not against a wall-clock "now" they never reach.
+  let momentum: OrderSummary["momentum"] = null;
+  if (byMonthIdx.size >= 2) {
+    const maxIdx = Math.max(...byMonthIdx.keys());
+    const sumRange = (lo: number, hi: number) => {
+      let s = 0;
+      for (let i = lo; i <= hi; i++) s += byMonthIdx.get(i) ?? 0;
+      return s;
+    };
+    const recent = sumRange(maxIdx - 2, maxIdx);
+    const prior = sumRange(maxIdx - 5, maxIdx - 3);
+    momentum = {
+      recent,
+      prior,
+      pct: prior > 0 ? (recent - prior) / prior : null,
+    };
+  }
+
   return {
     total: orders.length,
     uniqueFans: byUser.size,
@@ -166,5 +252,9 @@ export function summarizeOrders(orders: ArtistOrder[]): OrderSummary {
       .slice(0, 6)
       .map((p) => ({ name: p.name, count: p.count })),
     ratedAvg: ratingN ? ratingSum / ratingN : null,
+    monthly,
+    lastOrderAt,
+    momentum,
+    byCalendarMonth: calMonth,
   };
 }
