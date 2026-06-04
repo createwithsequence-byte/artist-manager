@@ -5,6 +5,7 @@ import type { ArtistReport, Signal } from "@/lib/types";
 import { customerKeys } from "@/lib/identity";
 import { customerEmail, type Customer } from "@/lib/customerCrossover";
 import { firstName, type OrderSummary } from "@/lib/orders";
+import { daysAgoLabel } from "@/lib/outreach";
 import {
   ANNOUNCEMENT_LABEL,
   buildBroadcastEmail,
@@ -461,6 +462,12 @@ function IdentityMirror({
   const [topStates, setTopStates] = useState<
     { state: string; count: number }[]
   >([]);
+  const [fanbase, setFanbase] = useState<number | null>(null);
+  const [outreach, setOutreach] = useState<{
+    last: string | null;
+    count: number;
+    reached: number;
+  }>({ last: null, count: 0, reached: 0 });
   const [phase, setPhase] = useState<"loading" | "ready" | "none">("loading");
 
   useEffect(() => {
@@ -491,6 +498,8 @@ function IdentityMirror({
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
+        const cc = d?.dataset?.customerCount;
+        if (typeof cc === "number") setFanbase(cc);
         const agg = d?.dataset?.aggregate;
         if (!Array.isArray(agg)) return;
         const m = new Map<string, number>();
@@ -511,6 +520,33 @@ function IdentityMirror({
     };
   }, [artistKey]);
 
+  // Outreach summary from the ledger — last contacted + total reach.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/outreach?artist=${encodeURIComponent(artistKey)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled || !Array.isArray(d?.entries)) return;
+        const entries = d.entries as {
+          createdAt: string;
+          recipientCount: number;
+        }[];
+        const last = entries.reduce<string | null>(
+          (acc, e) => (!acc || e.createdAt > acc ? e.createdAt : acc),
+          null,
+        );
+        const reached = entries.reduce(
+          (s, e) => s + (e.recipientCount || 0),
+          0,
+        );
+        setOutreach({ last, count: entries.length, reached });
+      })
+      .catch((err) => console.warn("[MIRROR] outreach failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [artistKey]);
+
   if (phase !== "ready" || !summary) return null;
 
   const occMax = summary.byOccasion[0]?.count || 1;
@@ -519,15 +555,38 @@ function IdentityMirror({
   return (
     <div className="md:col-span-2 pt-3 border-t border-ink/10">
       <div className="mono text-ink/50 mb-3">
-        ✦ BODY OF WORK · {artistName.toUpperCase()}
+        ✦ {artistName.toUpperCase()} · BY THE NUMBERS
       </div>
-      <div className="flex items-baseline gap-3 flex-wrap mb-1">
-        <span className="display text-4xl md:text-5xl text-red">
-          {summary.total.toLocaleString()}
-        </span>
-        <span className="serif-italic text-ink/70">
-          songs for {summary.uniqueFans.toLocaleString()} real people
-        </span>
+      {/* Three pillars at a glance: the work, the reach, the relationship. */}
+      <div className="flex flex-wrap gap-x-10 gap-y-3 mb-4">
+        <div>
+          <div className="display text-4xl md:text-5xl text-red leading-none">
+            {summary.total.toLocaleString()}
+          </div>
+          <div className="mono text-ink/45 text-xs mt-1">
+            SONGS · {summary.uniqueFans.toLocaleString()} PEOPLE
+          </div>
+        </div>
+        {fanbase != null && fanbase > 0 && (
+          <div>
+            <div className="display text-4xl md:text-5xl text-blue leading-none">
+              {fanbase.toLocaleString()}
+            </div>
+            <div className="mono text-ink/45 text-xs mt-1">FANS REACHABLE</div>
+          </div>
+        )}
+        <div>
+          <div className="display text-4xl md:text-5xl leading-none">
+            {outreach.reached > 0 ? outreach.reached.toLocaleString() : "—"}
+          </div>
+          <div className="mono text-ink/45 text-xs mt-1">
+            {outreach.count > 0 && outreach.last
+              ? `FANS REACHED · ${outreach.count} SEND${
+                  outreach.count === 1 ? "" : "S"
+                } · LAST ${daysAgoLabel(outreach.last, Date.now()).toUpperCase()}`
+              : "NOT YET REACHED OUT"}
+          </div>
+        </div>
       </div>
       {line && (
         <div className="serif-italic text-ink/80 mb-4 max-w-2xl">{line}</div>

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 type Props = {
   state: "idle" | "scouting" | "done";
   current?: string;
@@ -53,7 +55,13 @@ export function Toolbar({
     <header className="sticky top-0 z-50 bg-cream/95 backdrop-blur border-b border-ink/15">
       <div className="flex items-center gap-6 px-5 h-14">
         <div className="flex items-baseline gap-3">
-          <span className="display text-xl tracking-tight">Artist Manager</span>
+          <Link
+            href="/"
+            className="display text-xl tracking-tight hover:text-red transition-colors"
+            title="Home — artist roster"
+          >
+            Artist Manager
+          </Link>
           <span className="mono text-ink/40">v0.1</span>
         </div>
 

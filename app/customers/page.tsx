@@ -327,10 +327,10 @@ export default function CustomersPage() {
       <header className="flex items-center gap-4 px-5 py-3 border-b border-ink/15 bg-white">
         <Link
           href="/"
-          className="display text-2xl hover:text-red transition-colors"
-          title="Back to artist roster"
+          className="mono text-xs border border-ink/30 hover:bg-ink hover:text-cream transition-colors px-2.5 h-8 inline-flex items-center gap-1.5 shrink-0"
+          title="Back to the artist roster"
         >
-          ←
+          ← ROSTER
         </Link>
         <span className="display text-2xl">
           {isArtistWorld ? (
