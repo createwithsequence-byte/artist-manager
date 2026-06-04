@@ -1,0 +1,41 @@
+name: Keep Spotify sidecar warm
+
+# The Spotify sidecar runs on Render's free tier, which spins the service DOWN
+# after ~15 minutes of inactivity (cold start ~50s). A cold box made scouts
+# silently drop Spotify listeners, top cities, and tour dates. The scout itself
+# now wakes-and-retries (lib/spotify.ts), so correctness is covered — this cron
+# just keeps the box warm so scouts stay fast. Free: GitHub Actions is unlimited
+# on public repos.
+
+on:
+  schedule:
+    # Every 10 min — comfortably under Render's 15-min idle sleep. GitHub's
+    # scheduler is best-effort (can lag under load); the scout's retry covers
+    # any gap, so an occasional miss is harmless.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+
+# Never let pings pile up if one run lags.
+concurrency:
+  group: keep-sidecar-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping sidecar /health (wakes it if cold)
+        run: |
+          echo "Pinging sidecar at $(date -u)"
+          # -m 90 absorbs a full cold start; --retry rides out transient blips.
+          code=$(curl -s -o /dev/null -w "%{http_code}" -m 90 \
+            --retry 2 --retry-delay 15 --retry-all-errors \
+            "https://artist-manager-sidecar.onrender.com/health" || echo "000")
+          echo "sidecar /health → HTTP $code"
+          # A transient miss isn't a failure — the next cycle (and the scout's
+          # own retry) cover it. Warn instead of failing so the Actions log
+          # doesn't fill with red.
+          if [ "$code" != "200" ]; then
+            echo "::warning::sidecar returned $code — will retry next cycle"
+          fi
