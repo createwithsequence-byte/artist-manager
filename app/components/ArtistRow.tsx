@@ -400,18 +400,23 @@ export function ArtistRow({
             </div>
           )}
 
-          {report.events && report.events.length > 0 && (
-            <div className="md:col-span-2 pt-3 border-t border-ink/10">
-              <div className="mono text-ink/50 mb-3">
-                ◎ CUSTOMER CROSSOVER · TOUR INTERSECTION
-              </div>
-              <CustomerCrossoverPanel
-                events={report.events}
-                artistName={report.name}
-                customerKeys={customerKeys(report)}
-              />
+          {/* Customer world + tour planner. Rendered for EVERY artist, not just
+              those with upcoming dates — the customer data, uploads, and the
+              tour agent (which proposes a run from scratch) are valuable for a
+              QUIET artist too. Gating this on events hid the whole thing —
+              including where you drop the customer data. */}
+          <div className="md:col-span-2 pt-3 border-t border-ink/10">
+            <div className="mono text-ink/50 mb-3">
+              {report.events && report.events.length > 0
+                ? "◎ CUSTOMER CROSSOVER · TOUR INTERSECTION"
+                : "◎ CUSTOMER WORLD · TOUR PLANNER"}
             </div>
-          )}
+            <CustomerCrossoverPanel
+              events={report.events ?? []}
+              artistName={report.name}
+              customerKeys={customerKeys(report)}
+            />
+          </div>
 
           <div className="md:col-span-2 pt-3 border-t border-ink/10">
             <div className="mono text-ink/50 mb-3">

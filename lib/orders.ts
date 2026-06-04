@@ -38,7 +38,11 @@ function makeGet(row: Record<string, string>) {
   return (...keys: string[]): string => {
     for (const k of keys) {
       const v = lower[k.toLowerCase()];
-      if (v !== undefined && v !== null) return String(v).trim();
+      // Skip empty/blank so the lookup falls through to the next candidate —
+      // e.g. an empty `order_date` should defer to a populated `delivery_date`
+      // rather than winning the chain with "".
+      if (v !== undefined && v !== null && String(v).trim() !== "")
+        return String(v).trim();
     }
     return "";
   };

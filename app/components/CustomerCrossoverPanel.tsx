@@ -285,17 +285,17 @@ export function CustomerCrossoverPanel({
     if (file) handleFile(file);
   };
 
-  if (!events || events.length === 0) {
-    return (
-      <div className="serif-italic text-ink/55 text-sm">
-        No upcoming events for {artistName}. Routing needs tour dates to plot —
-        re-scout when {artistName} announces something.
-      </div>
-    );
-  }
+  const hasEvents = events && events.length > 0;
 
   return (
     <div>
+      {!hasEvents && (
+        <div className="mb-3 serif-italic text-ink/60 text-sm">
+          No tour dates for {artistName} yet — upload their fans below to build
+          the world, then ask the ✦ Tour Agent to propose a run. Routing plots
+          automatically once they announce shows.
+        </div>
+      )}
       {persistError && (
         <div className="mb-3 border border-red bg-red/5 px-3 py-2 mono text-xs text-red">
           ⚠ Couldn&apos;t save this dataset ({persistError}). Browsing works
