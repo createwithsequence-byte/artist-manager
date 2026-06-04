@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import type { ArtistReport, Signal } from "@/lib/types";
 import { customerKeys } from "@/lib/identity";
 import { customerEmail, type Customer } from "@/lib/customerCrossover";
@@ -567,14 +568,36 @@ function IdentityMirror({
             SONGS · {summary.uniqueFans.toLocaleString()} PEOPLE
           </div>
         </div>
-        {fanbase != null && fanbase > 0 && (
-          <div>
-            <div className="display text-4xl md:text-5xl text-blue leading-none">
-              {fanbase.toLocaleString()}
-            </div>
-            <div className="mono text-ink/45 text-xs mt-1">FANS REACHABLE</div>
-          </div>
-        )}
+        <div>
+          {fanbase != null && fanbase > 0 ? (
+            <>
+              <div className="display text-4xl md:text-5xl text-blue leading-none">
+                {fanbase.toLocaleString()}
+              </div>
+              <div className="mono text-ink/45 text-xs mt-1">
+                FANS REACHABLE
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="display text-4xl md:text-5xl text-ink/25 leading-none">
+                —
+              </div>
+              <div className="mono text-ink/45 text-xs mt-1">
+                NO FAN LIST YET
+              </div>
+            </>
+          )}
+          <Link
+            href={`/customers?artist=${encodeURIComponent(
+              artistKey,
+            )}&name=${encodeURIComponent(artistName)}&import=1`}
+            className="mono text-blue text-xs mt-1.5 inline-flex items-center gap-1 hover:underline"
+            title="Import this artist's own mailing list (CSV with an email column) — merges with the Songfinch fans, deduped by email"
+          >
+            ＋ import fan list
+          </Link>
+        </div>
         <div>
           <div className="display text-4xl md:text-5xl leading-none">
             {outreach.reached > 0 ? outreach.reached.toLocaleString() : "—"}

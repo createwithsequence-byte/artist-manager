@@ -93,12 +93,13 @@ export function TourChat({
     <div className="mt-5 border-t border-ink/15 pt-3">
       <button
         onClick={() => setOpen(!open)}
-        className="mono text-ink/55 hover:text-ink flex items-center gap-2"
+        className="group flex items-center gap-2.5"
       >
-        {open ? "▾" : "▸"} ✦ TOUR AGENT
-        <span className="text-ink/35">
-          (give context — drive/fly, blackout dates, region — it revises the
-          run)
+        <span className="mono font-bold text-blue text-sm group-hover:text-ink transition-colors">
+          {open ? "▾" : "▸"} ✦ TOUR AGENT
+        </span>
+        <span className="mono text-ink/45 text-xs hidden sm:inline">
+          give context — drive/fly, blackout dates, region — it revises the run
         </span>
       </button>
 

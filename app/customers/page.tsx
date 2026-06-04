@@ -88,6 +88,10 @@ export default function CustomersPage() {
   const [adopting, setAdopting] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const importInput = useRef<HTMLInputElement>(null);
+  // Arrived from a dashboard "＋ import fan list" link (?import=1) — flag the
+  // IMPORT FANBASE button so the eye lands on it. (We don't auto-open the file
+  // picker: browsers block programmatic picker opens without a user gesture.)
+  const [highlightImport, setHighlightImport] = useState(false);
 
   // On mount: read ?artist + ?name from the URL (window.location avoids the
   // useSearchParams Suspense-boundary requirement), then hydrate THAT dataset.
@@ -101,6 +105,7 @@ export default function CustomersPage() {
     setDatasetId(id);
     setIsArtistWorld(!!artist);
     if (name) setDatasetName(name);
+    if (params.get("import") === "1") setHighlightImport(true);
 
     fetch(`/api/customers?id=${encodeURIComponent(id)}`)
       .then((r) => r.json())
@@ -377,8 +382,15 @@ export default function CustomersPage() {
               <span className="font-bold">{headerStats.states}</span>
             </span>
             <button
-              onClick={() => importInput.current?.click()}
-              className="px-2 h-7 border border-blue/40 text-blue hover:bg-blue hover:text-cream transition-colors"
+              onClick={() => {
+                setHighlightImport(false);
+                importInput.current?.click();
+              }}
+              className={`px-2 h-7 border transition-colors ${
+                highlightImport
+                  ? "bg-blue text-cream border-blue ring-2 ring-blue/40 ring-offset-2 ring-offset-cream pulse-dot"
+                  : "border-blue/40 text-blue hover:bg-blue hover:text-cream"
+              }`}
               title="Import the artist's own mailing list (CSV with an email column) — merges with the Songfinch fans, deduped by email"
             >
               ＋ IMPORT FANBASE
